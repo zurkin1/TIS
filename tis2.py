@@ -40,7 +40,7 @@ seed_everything()
 
 stand = lambda x: (x-5.72)/14.1
 func = lambda x: stand(float(x.parts[-1].split('_')[0])) # Standardization.
-#func = lambda x: float(x.parts[-1].split('_')[0])/10
+#func = lambda x: float(x.parts[-1].split('_')[0])/10 # Scale.
 
 
 def tis_cdf(x):
