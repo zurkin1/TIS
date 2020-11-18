@@ -112,8 +112,8 @@ def test_model2(learn=None):
     df['pred'] = -1
     #df['score'] = (df.score-5.7)/1.4
     len_df = len(df)
-    def cdf_score(x):
-        return len(df.loc[df.score<=x])/len_df
+    #def cdf_score(x):
+    #    return len(df.loc[df.score<=x])/len_df
     #df['cdf_score'] = df.score.apply(cdf_score)
     df['zscore'] = df.score.apply(stand)
     avg_score = np.mean(df.zscore)
