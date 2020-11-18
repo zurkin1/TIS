@@ -36,7 +36,7 @@ def auto_gpu_selection(usage_max=0.01, mem_max=0.7):
     """Auto set CUDA_VISIBLE_DEVICES for gpu
     :param mem_max: max percentage of GPU utility
     :param usage_max: max percentage of GPU memory
-    :return:
+    :return: gpu number.
     """
     os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
     log = str(subprocess.check_output("nvidia-smi", shell=True)).split(r"\n")[6:-1]
@@ -356,7 +356,7 @@ if __name__ == "__main__":
     #Alexnet.
     model = models.alexnet(pretrained=True)
     #ft = list(model.features)
-    cl = list(model.classifier)
+    #cl = list(model.classifier)
     #Remove the max pooling layer.
     #model.features = nn.Sequential(ft[0],ft[1],ft[2],ft[3],ft[4],ft[5],ft[6],ft[7],ft[8],ft[9],ft10],ft[11])
     #model.classifier = nn.Sequential(cl[0],cl[1],cl[2],cl[3],cl[4],cl[5],cl[6],nn.ReLU(inplace=True),nn.Linear(1000,1),nn.Sigmoid())
