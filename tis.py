@@ -34,8 +34,8 @@ device = torch.device(f'cuda:{3}' if torch.cuda.is_available() else "cpu")
 
 def auto_gpu_selection(usage_max=0.01, mem_max=0.7):
     """Auto set CUDA_VISIBLE_DEVICES for gpu
-    :param mem_max: max percentage of GPU utility
-    :param usage_max: max percentage of GPU memory
+    :param mem_max: max percentage of GPU utility.
+    :param usage_max: max percentage of GPU memory.
     :return: gpu number.
     """
     os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
