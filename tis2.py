@@ -16,7 +16,7 @@ from tis import auto_gpu_selection
 
 
 tqdm.pandas()
-base_dir = '/home/dsi/zurkin/data23'
+base_dir = '/home/dsi/zurkin/data/data23'
 
 
 def seed_everything(seed=1234):
