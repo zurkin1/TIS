@@ -6,6 +6,7 @@ from sklearn.metrics import roc_auc_score, mean_squared_error
 import argparse
 from PIL import Image
 from torchvision import transforms
+import os
 
 
 def seed_everything(seed=1234):
@@ -18,29 +19,27 @@ def seed_everything(seed=1234):
 seed_everything()
 
 
-torch.cuda.set_device(0) #args.local_rank) # 3
+torch.cuda.set_device(0)
 stand = lambda x: (x-5.72)/14.1
-func1 = lambda x: stand(float(x.parts[-1].split('_')[0])) # Standardization.
-def func(x):
-    val = stand(float(x.split('_')[0]))
-    return val
-base_dir = '/home/dsi/zurkin/data/data23'
+base_dir = '/home/dsi/zurkin/data/data31' # data23
+df = pd.read_csv(base_dir+'/data_v2.csv')
 img_dir = Path(base_dir)
-fnames = get_image_files(base_dir)
-labels = [stand(float(x.name.split('_')[0])) for x in fnames]
-data_re = ImageDataLoaders.from_lists(img_dir, fnames, labels, bs=8, item_tfms=Resize(512), batch_tfms=aug_transforms(size=512)) #size=500
-#data_re = ImageList.from_folder(img_dir)\
-#                .split_by_rand_pct()\
-#                .label_from_func(func, label_cls=FloatList)\
-#                .transform(get_transforms(do_flip=True, flip_vert=True, max_rotate=180.0, max_lighting=0.4, p_affine=0.7, p_lighting=0.7), size=512)\
-#                .databunch(bs=8)\
-#                .normalize(imagenet_stats)
-learn = cnn_learner(data_re, resnet34) # , metrics=[RocAucBinary()]) #.to_distributed(args.local_rank)
+#fnames = get_image_files(base_dir)
+#labels = [stand(float(x.name.split('_')[0])) for x in fnames]
+df['path'] = base_dir + '/' + df.image
+df = df.loc[[os.path.isfile(x) for x in df.path.values]]
+fnames = df.path.values.tolist()
+labels = [stand(float(x)) for x in df.score.values.tolist()]
+data_re = ImageDataLoaders.from_lists(img_dir, fnames, labels, bs=8, #item_tfms=Resize(1000),
+        batch_tfms=aug_transforms(do_flip=True, flip_vert=True, max_rotate=180.0, max_lighting=0.4, p_affine=0.7, p_lighting=0.7, xtra_tfms=Normalize.from_stats(*imagenet_stats)))
+learn = cnn_learner(data_re, alexnet)
 #learn.load(base_dir+'models/model')
-learn.fit_one_cycle(n_epoch=30, lr_max=9e-4, wd=0.3) # , div_factor=10, cbs=[SaveModelCallback(monitor='roc_auc_score')]) # 3e-3 
+#print(learn.lr_find())
+learn.fit_one_cycle(n_epoch=30, lr_max=9e-5, wd=0.3) # , div_factor=10 , cbs=[SaveModelCallback(monitor='roc_auc_score')]) # 3e-3 
+#learn.fine_tune(epochs=10, base_lr=2e-5, wd=0.3) # , div_factor=10 , cbs=[SaveModelCallback(monitor='roc_auc_score')]) # 3e-3 
 
 # Test nodel.
-df = pd.read_csv(base_dir+'/data_v2.csv', index_col=0)
+df = pd.read_csv(base_dir+'/data_v2.csv')
 df['pred'] = -1
 df['zscore'] = df.score.apply(stand)
 avg_score = np.mean(df.zscore)

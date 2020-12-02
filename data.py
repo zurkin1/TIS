@@ -9,10 +9,10 @@ import shutil
 
 
 def filter_data():
-    dir_in = '/home/dsi/zurkin/data21/all/'
-    dir_out = '/home/dsi/zurkin/data21a/train/'
+    dir_in = '/home/dsi/zurkin/data/data31/'
+    dir_out = '/home/dsi/zurkin/data/data31a_test/'
 
-    df = pd.read_csv('/home/dsi/zurkin/data21a/train.csv',index_col=['image'])
+    df = pd.read_csv('/home/dsi/zurkin/data/data31a/test.csv',index_col=['image'])
     lst = list(df.index.values)
     print(lst)
     # print(df.loc['TCGA-AC-A3YJ-01Z-00-DX1.8E665F69-FD8C-419A-871F-3AEE2E5A3A60.251-7.jpg']['class'])
@@ -120,5 +120,26 @@ def prepare_data(csv_file):
 # validate.to_csv("/home/dsi/zurkin/data27/validate.csv", index=False)
 #prepare_data(root_path='/home/dsi/zurkin/data27/',csv_file='/home/dsi/zurkin/data27/1045.csv')
 
-analyse()
+#analyse()
 #prepare_data('/home/dsi/zurkin/data21_all/1045.csv')
+'''
+df = pd.read_csv('/home/dsi/zurkin/data/data31.csv')[['image', 'score']]
+df = df.sample(frac=1) #shaffle
+df['class']= ['low' if x<6 else 'high' for x in df['score']]
+
+    #train, validate, test = np.split(df.sample(frac=1), [int(.80*len(df)), int(.9*len(df))])  #split to: train 80%, test 10%, validation 10%
+df['image_name'] = df.image.apply(lambda x: x[5:12])
+image_num = df.image_name.unique()
+    #print(image_num)
+train, test, validate = np.split(image_num, [int(.70*len(image_num)), int(.85*len(image_num))])
+    #train, test, validate = np.split(image_num, [int(.80*len(image_num)), int(len(image_num))])
+
+train = df[df.image_name.isin(train)][['image','score', 'class']].sample(frac=1)
+test = df[df.image_name.isin(test)][['image', 'score','class']].sample(frac=1)
+validate = df[df.image_name.isin(validate)][['image', 'score','class']].sample(frac=1)
+
+train.to_csv("/home/dsi/zurkin/data/data31a/train.csv", index=False)
+test.to_csv("/home/dsi/zurkin/data/data31a/test.csv", index=False)
+validate.to_csv("/home/dsi/zurkin/data/data31a/validate.csv", index=False)
+'''
+filter_data()

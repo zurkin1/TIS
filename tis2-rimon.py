@@ -1,16 +1,31 @@
+# from fastai.vision import *
+# #from fastai.metrics import error_rate
+# from fastai.vision.models.wrn import wrn_22
+# from fastai.distributed import *
+# from fastai.callbacks import *
+# from pathlib import Path
+# from sklearn.metrics import roc_auc_score
+# import argparse
+# import os
+# import numpy as np
+# from tqdm import tqdm
+# from sklearn.metrics import r2_score, mean_squared_error
+
+from fastai import *
 from fastai.vision import *
+#from fastai.tabular import *
 #from fastai.metrics import error_rate
 from fastai.vision.models.wrn import wrn_22
-from fastai.distributed import *
+#from fastai.distributed import *
 from fastai.callbacks import *
 from pathlib import Path
-from sklearn.metrics import roc_auc_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score, mean_squared_error
 import argparse
 import os
 import numpy as np
 from tqdm import tqdm
-from sklearn.metrics import r2_score, mean_squared_error
-
+from tis import auto_gpu_selection
 
 
 #python -m torch.distributed.launch --nproc_per_node=4 tis2-rimon.py
@@ -24,7 +39,7 @@ torch.cuda.set_device(1)
 '''
 
 tqdm.pandas()
-base_dir = '/home/dsi/zurkin/data22'
+base_dir = '/home/dsi/zurkin/data/data31a'
 
 
 def seed_everything(seed=1234):
@@ -305,14 +320,15 @@ def train_histograms():
 
 
 if __name__ == '__main__':
+        train_model_classification(30)
         # learn = train_model(5)
         # #use_model(learn)
         # test_model2(learn)
         # #train_histograms()
 
-        df = pd.read_csv(base_dir+'/temp1-r.csv')
-        print(roc_auc_score(df.bin_score, df.pred)) # , roc_auc_score(df2.bin_score, df2.pred))
-        r2 = r2_score(df['score'], df['pred']*10)
-        mse = mean_squared_error(df['score'], df['pred']*10)
-        print("r2: ",r2, "MSE: ",mse)
+        # df = pd.read_csv(base_dir+'/temp1-r.csv')
+        # print(roc_auc_score(df.bin_score, df.pred)) # , roc_auc_score(df2.bin_score, df2.pred))
+        # r2 = r2_score(df['score'], df['pred']*10)
+        # mse = mean_squared_error(df['score'], df['pred']*10)
+        # print("r2: ",r2, "MSE: ",mse)
 
