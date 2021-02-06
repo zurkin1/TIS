@@ -11,21 +11,33 @@
 # from tqdm import tqdm
 # from sklearn.metrics import r2_score, mean_squared_error
 
-from fastai import *
-from fastai.vision import *
-#from fastai.tabular import *
-#from fastai.metrics import error_rate
-from fastai.vision.models.wrn import wrn_22
-#from fastai.distributed import *
-from fastai.callbacks import *
+# from fastai import *
+# from fastai.vision import *
+# #from fastai.tabular import *
+# #from fastai.metrics import error_rate
+# from fastai.vision.models.wrn import wrn_22
+# #from fastai.distributed import *
+# from fastai.callbacks import *
+# from pathlib import Path
+# from sklearn.linear_model import LogisticRegression
+# from sklearn.metrics import roc_auc_score, mean_squared_error
+# import argparse
+# import os
+# import numpy as np
+# from tqdm import tqdm
+# from tis import auto_gpu_selection
+
+
+from fastai.vision.all import *
+from fastai.metrics import error_rate
+from fastai.distributed import *
 from pathlib import Path
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, mean_squared_error
 import argparse
+from PIL import Image
+from torchvision import transforms
 import os
-import numpy as np
-from tqdm import tqdm
-from tis import auto_gpu_selection
+
 
 
 #python -m torch.distributed.launch --nproc_per_node=4 tis2-rimon.py
@@ -38,8 +50,11 @@ torch.distributed.init_process_group(backend='nccl', init_method='env://')
 torch.cuda.set_device(1)
 '''
 
-tqdm.pandas()
-base_dir = '/home/dsi/zurkin/data/data31a'
+
+#tqdm.pandas()
+#base_dir = "/home/dsi/rimonshy/MS_rimon/data/BRCA/data31"
+
+base_dir = "/home/dsi/zurkin/data/data21"
 
 
 def seed_everything(seed=1234):
@@ -96,13 +111,15 @@ df.to_csv(base_dir+'temp1.csv')
 '''
 def train_model_classification(cyc_len):
         img_dir = Path(base_dir)
-        data = ImageDataBunch.from_folder(img_dir,
+        data = ImageDataLoaders.from_folder(img_dir,
                 bs=16,
                 #valid_pct=0.95,
-                train=Path(base_dir+'/train'),
-                valid=Path(base_dir+'/validate'),
-                ds_tfms=get_transforms(do_flip=True, flip_vert=True, max_rotate=180.0, max_lighting=0.4, p_affine=0.4, p_lighting=0.75),
-                size=512).normalize() # imagenet_stats)
+                train=base_dir+'/train',
+                valid=base_dir+'/validate'
+                #,item_tfms=Resize(1000),
+      #  batch_tfms=aug_transforms(do_flip=True, flip_vert=True, max_rotate=180.0, max_lighting=0.4, p_affine=0.7, p_lighting=0.7, xtra_tfms=Normalize.from_stats(*imagenet_stats))
+        ) 
+
         learn = cnn_learner(data, models.resnet34, metrics=[AUROC()]) #.to_distributed(args.local_rank)
 
         learn.fit_one_cycle(
@@ -115,7 +132,7 @@ def train_model_classification(cyc_len):
 
         return learn
 
-def train_model(cyc_len):
+def train_model_regression(cyc_len):
     img_dir = Path(base_dir)
     df = pd.read_csv(base_dir+'/data_v2.csv', index_col=0)
     #data_cl = ImageDataBunch.from_folder(img_dir, bs=8,
@@ -320,6 +337,7 @@ def train_histograms():
 
 
 if __name__ == '__main__':
+        seed_everything()
         train_model_classification(30)
         # learn = train_model(5)
         # #use_model(learn)

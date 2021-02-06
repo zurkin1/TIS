@@ -48,7 +48,7 @@ def tis_cdf(x):
     df = pd.read_csv(base_dir+'/data_v2.csv', index_col=0)
     tis = float(x.parts[-1].split('_')[0])
     return len(df.loc[df.score<=tis])/len(df)
-    
+
 
 def train_model():
     img_dir = Path(base_dir)
@@ -64,6 +64,7 @@ def train_model():
                     .databunch(bs=8)\
                     .normalize(imagenet_stats)
     learn = cnn_learner(data_re, models.alexnet) # , metrics=[AUROC()]) #.to_distributed(args.local_rank)
+    #TIS scores are normallys distributed. As such their CDF is Sigmoid shape and the TIS itself is Sigmoid rotated shape. It might be useful to replace the last linear layer.
     #learn.model = nn.Sequential(learn.model[0],
     #                            nn.Sequential(
     #                                          *list(children(learn.model[1])),
@@ -82,7 +83,7 @@ def train_model():
     #fig = learn.recorder.plot_lr(return_fig=True)
     #fig.savefig('lr')
     #print(learn.recorder.min_grad_lr)
-    
+
     learn.fit_one_cycle(cyc_len=30, max_lr=9e-4, wd=0.3, div_factor=10) # callbacks=[SaveModelCallback(learn, name=f'model', monitor='auroc')]) # 3e-3 div_factor=10, max_lr=slice(1e-7, 1e-4), pct_start=0.5
     #learn.freeze_to(1)
     #learn.fit_one_cycle(cyc_len=20, max_lr=9e-4, wd=0.3, div_factor=10) # callbacks=[SavedModelCallback(learn, name=f'model', monitor='auroc')]) # 3e-3 div_factor=10, max_lr=slice(1e-7, 1e-4), pct_start=0.5i
@@ -118,7 +119,7 @@ def test_model2(learn=None):
     df['zscore'] = df.score.apply(stand)
     avg_score = np.mean(df.zscore)
     df['bin_score'] = df.zscore.apply(lambda x: 0 if x <= avg_score else 1) # 0.57238 0.56178
-    
+
     preds = []
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
@@ -167,7 +168,7 @@ def use_model(learn):
     df = pd.merge(df, test, on = 'image_name')
     df2 = df.groupby('image_name').progress_apply(process_image)
     df2.to_csv(f'part_b_out.csv')
- 
+
 
 def train_histograms():
     df = pd.read_csv('histdata.csv')
