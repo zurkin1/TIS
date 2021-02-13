@@ -5,11 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 import cv2
-
-from fastai.vision.all import *
-from fastai.metrics import error_rate
-from fastai.distributed import *
-from sklearn.metrics import roc_auc_score, mean_squared_error
 import argparse
 from PIL import Image
 from torchvision import transforms
@@ -17,29 +12,24 @@ import os
 import fastai
 import hpacellseg.cellsegmentator as cellsegmentator
 from hpacellseg.utils import label_cell
-print(fastai.__version__)
+import pandas as pd
+import matplotlib.pyplot as plt
+import ast
+from tqdm import tqdm
+import torch
+from pycocotools import _mask as coco_mask
+import zlib
+import base64
+from fastai.vision.all import *
+from fastai.metrics import error_rate
+from fastai.distributed import *
 
-
-def seed_everything(seed=1234):
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-seed_everything()
-
-
-torch.cuda.set_device(5)
-path = Path('/home/dsi/zurkin/data/')
+########################### Create bbox.
+torch.cuda.set_device(1)
+path = '/home/dsi/zurkin/data/'
 protein_stats = ([0.08069, 0.05258, 0.05487], [0.13704, 0.10145, 0.15313])
-"""
-#trn_tfms,_ = get_transforms(do_flip=True, flip_vert=True, max_rotate=30., max_zoom=1, max_lighting=0.05, max_warp=0.)
 src = ImageDataLoaders.from_folder(path+'hpa/', valid_pct=0.05, # bs=64,
                                 batch_tfms=aug_transforms(do_flip=True, flip_vert=True, max_rotate=180.0, max_lighting=0.4, p_affine=0.7, p_lighting=0.7, xtra_tfms=Normalize.from_stats(*protein_stats)))
-
-f1score_multi = F1Score() #F1ScoreMulti()
-def _resnet_split(m): return (m[0][6],m[1])
 learn = cnn_learner(
     src,
     alexnet, #resnet18,
@@ -49,28 +39,13 @@ learn = cnn_learner(
     path=path+'hpa/',
     #metrics=[f1score_multi]
 )
-
-#learn.lr_find()
-#learn.recorder.plot()
-
-lr = 3e-2
-learn.fit_one_cycle(3, slice(lr))
-learn.save('stage-1-rn18-datablocks')
-learn.unfreeze()
-learn.fit_one_cycle(60, slice(3e-5, lr/5))
-learn.save('stage-2-rn18')
-"""
-########################### Prediction.
-import pandas as pd
-import matplotlib.pyplot as plt
-import ast
-import tqdm
+learn.load('stage-2-rn18')
 
 
 def binary_mask_to_ascii(mask, mask_val=1):
     """Converts a binary mask into OID challenge encoding ascii text."""
     mask = np.where(mask==mask_val, 1, 0).astype(np.bool)
-    
+
     # check input mask --
     if mask.dtype != np.bool:
         raise ValueError(f"encode_binary_mask expects a binary mask, received dtype == {mask.dtype}")
@@ -98,14 +73,14 @@ def rle_encoding(img, mask_val=1):
     Turns our masks into RLE encoding to easily store them
     and feed them into models later on
     https://en.wikipedia.org/wiki/Run-length_encoding
-    
+
     Args:
         img (np.array): Segmentation array
         mask_val (int): Which value to use to create the RLE
-        
+
     Returns:
         RLE string
-    
+
     """
     dots = np.where(img.T.flatten() == mask_val)[0]
     run_lengths = []
@@ -114,19 +89,19 @@ def rle_encoding(img, mask_val=1):
         if (b>prev+1): run_lengths.extend((b + 1, 0))
         run_lengths[-1] += 1
         prev = b
-        
+
     return ' '.join([str(x) for x in run_lengths])
 
 
 def rle_to_mask(rle_string, height, width):
-    """ Convert RLE sttring into a binary mask 
-    
+    """ Convert RLE sttring into a binary mask
+
     Args:
-        rle_string (rle_string): Run length encoding containing 
+        rle_string (rle_string): Run length encoding containing
             segmentation mask information
         height (int): Height of the original image the map comes from
         width (int): Width of the original image the map comes from
-    
+
     Returns:
         Numpy array of the binary segmentation mask for a given cell
     """
@@ -142,7 +117,7 @@ def rle_to_mask(rle_string, height, width):
     return img
 
 
-def decode_img(img, img_size=(128,128), testing=False):
+def decode_img(img, img_size=(224,224), testing=False):
     """TBD"""
     
     # convert the compressed string to a 3D uint8 tensor
@@ -152,10 +127,9 @@ def decode_img(img, img_size=(128,128), testing=False):
         return tf.cast(tf.image.resize(img, img_size), tf.uint8)
     else:
         return tf.image.decode_png(img, channels=1)
-        
 
-    
-def preprocess_path_ds(rp, gp, bp, yp, lbl, n_classes=19, img_size=(128,128), combine=True, drop_yellow=True):
+
+def preprocess_path_ds(rp, gp, bp, yp, lbl, n_classes=19, img_size=(224,224), combine=True, drop_yellow=True):
     """ TBD """
     
     ri = decode_img(tf.io.read_file(rp), img_size)
@@ -170,9 +144,9 @@ def preprocess_path_ds(rp, gp, bp, yp, lbl, n_classes=19, img_size=(128,128), co
     elif drop_yellow:
         return ri, gi, bi, tf.one_hot(lbl, n_classes, dtype=tf.uint8)
     else:
-        return ri, gi, bi, yi, tf.one_hot(lbl, n_classes, dtype=tf.uint8)        
-    
-    
+        return ri, gi, bi, yi, tf.one_hot(lbl, n_classes, dtype=tf.uint8)
+
+
 def load_image(img_id, img_dir, testing=False):
     """ Load An Image Using ID and Directory Path - Composes 4 Individual Images """
     if not testing:
@@ -184,7 +158,9 @@ def load_image(img_id, img_dir, testing=False):
     else:
         # This is for cellsegmentator
         return np.stack(
-            [np.asarray(decode_img(tf.io.read_file(os.path.join(img_dir, img_id+f"_{c}.png")), testing=True), np.uint8)[..., 0] \
+            [np.asarray(Image.open(os.path.join(img_dir, img_id+f"_{c}.png")), \
+                        #decode_img(tf.io.read_file(os.path.join(img_dir, img_id+f"_{c}.png")), testing=True), \
+                        np.uint8) \
              for c in ["red", "green", "blue", "yellow"]], axis=0
         )
 
@@ -196,37 +172,37 @@ def plot_rgb(arr, figsize=(12,12)):
     plt.imshow(arr)
     plt.axis(False)
     plt.show()
-    
-    
+
+
 def convert_rgby_to_rgb(arr):
     """ Convert a 4 channel (RGBY) image to a 3 channel RGB image.
-    
+
     Advice From Competition Host/User: lnhtrang
 
-    For annotation (by experts) and for the model, I guess we agree that individual 
-    channels with full range px values are better. 
-    In annotation, we toggled the channels. 
-    For visualization purpose only, you can try blending the channels. 
-    For example, 
+    For annotation (by experts) and for the model, I guess we agree that individual
+    channels with full range px values are better.
+    In annotation, we toggled the channels.
+    For visualization purpose only, you can try blending the channels.
+    For example,
         - red = red + yellow
         - green = green + yellow/2
         - blue=blue.
-        
+
     Args:
         arr (numpy array): The RGBY, 4 channel numpy array for a given image
-    
+
     Returns:
         RGB Image
     """
-    
+
     rgb_arr = np.zeros_like(arr[..., :-1])
     rgb_arr[..., 0] = arr[..., 0]
     rgb_arr[..., 1] = arr[..., 1]+arr[..., 3]/2
     rgb_arr[..., 2] = arr[..., 2]
-    
+
     return rgb_arr
-    
-    
+
+
 def plot_ex(arr, figsize=(20,6), title=None, plot_merged=True, rgb_only=False):
     """ Plot 4 Channels Side by Side """
     if plot_merged and not rgb_only:
@@ -271,13 +247,6 @@ def plot_ex(arr, figsize=(20,6), title=None, plot_merged=True, rgb_only=False):
         
     plt.tight_layout(rect=[0, 0.2, 1, 0.97])
     plt.show()
-    
-    
-def flatten_list_of_lists(l_o_l, to_string=False):
-    if not to_string:
-        return [item for sublist in l_o_l for item in sublist]
-    else:
-        return [str(item) for sublist in l_o_l for item in sublist]
 
 
 def create_segmentation_maps(list_of_image_lists, segmentator, batch_size=8):
@@ -347,21 +316,28 @@ def get_contour_bbox_from_rle(rle, width, height, return_mask=True,):
         return x,y,x+w,y+h, mask
     else:
         return x,y,x+w,y+h
-    
+
+
+def flatten_list_of_lists(l_o_l, to_string=False):
+    if not to_string:
+        return [item for sublist in l_o_l for item in sublist]
+    else:
+        return [str(item) for sublist in l_o_l for item in sublist]
+
 
 def get_contour_bbox_from_raw(raw_mask):
     """ Get bbox of contour as `xmin ymin xmax ymax`
-    
+
     Args:
         raw_mask (nparray): Numpy array containing segmentation mask information
-    
+
     Returns:
         Numpy array for a cell bounding box coordinates
     """
     cnts = grab_contours(
         cv2.findContours(
-            raw_mask, 
-            cv2.RETR_EXTERNAL, 
+            raw_mask,
+            cv2.RETR_EXTERNAL,
             cv2.CHAIN_APPROX_SIMPLE
         ))
     xywhs = [cv2.boundingRect(cnt) for cnt in cnts]
@@ -471,7 +447,7 @@ def preprocess_row(img_id, img_w, img_h, combine=True, drop_yellow=True):
     else:
         return ri, gi, bi, yi
 
-    
+
 def plot_predictions(img, masks, preds, confs=None, fill_alpha=0.3, lbl_as_str=True):
     # Initialize
     FONT = cv2.FONT_HERSHEY_SIMPLEX; FONT_SCALE = 0.7; FONT_THICKNESS = 2; FONT_LINE_TYPE = cv2.LINE_AA;
@@ -483,12 +459,12 @@ def plot_predictions(img, masks, preds, confs=None, fill_alpha=0.3, lbl_as_str=T
 
     cnts = grab_contours(
         cv2.findContours(
-            masks, 
-            cv2.RETR_EXTERNAL, 
+            masks,
+            cv2.RETR_EXTERNAL,
             cv2.CHAIN_APPROX_SIMPLE
         ))
     cnts = sorted(cnts, key=lambda x: (cv2.boundingRect(x)[1], cv2.boundingRect(x)[0]))
-        
+
     for c, pred, conf in zip(cnts, preds, confs):
         # We can only display one color so we pick the first
         color = COLORS[pred[0]]
@@ -499,17 +475,17 @@ def plot_predictions(img, masks, preds, confs=None, fill_alpha=0.3, lbl_as_str=T
         M = cv2.moments(c)
         cx = int(M['m10']/M['m00'])
         cy = int(M['m01']/M['m00'])
-        
+
         text_width, text_height = cv2.getTextSize(classes, FONT, FONT_SCALE, FONT_THICKNESS)[0]
-        
+
         # Border and fill
         cv2.drawContours(to_plot, [c], contourIdx=-1, color=[max(0, x-40) for x in color], thickness=10)
         cv2.drawContours(cntr_img, [c], contourIdx=-1, color=(color), thickness=-1)
-        
+
         # Text
         cv2.putText(to_plot, classes, (cx-text_width//2,cy-text_height//2),
                     FONT, FONT_SCALE, [min(255, x+40) for x in color], FONT_THICKNESS, FONT_LINE_TYPE)
-    
+
     cv2.addWeighted(cntr_img, fill_alpha, to_plot, 1-fill_alpha, 0, to_plot)
     plt.figure(figsize=(16,16))
     plt.imshow(to_plot)
@@ -517,89 +493,95 @@ def plot_predictions(img, masks, preds, confs=None, fill_alpha=0.3, lbl_as_str=T
     plt.show()
 
 
-NUC_MODEL = 'dpn_unet_nuclei_v1.pth'
-CELL_MODEL = 'dpn_unet_cell_3ch_v1.pth'
-IMAGE_SIZES = [1728, 2048, 3072]
-BATCH_SIZE = 8
-CONF_THRESH = 0.25
-RELABEL_UNCERTAIN = True
-TILE_SIZE = (256,256)
+if __name__ == '__main__':
+    NUC_MODEL = 'dpn_unet_nuclei_v1.pth'
+    CELL_MODEL = 'dpn_unet_cell_3ch_v1.pth'
+    IMAGE_SIZES = [1728, 2048, 3072]
+    BATCH_SIZE = 8
+    CONF_THRESH = 0.25
+    RELABEL_UNCERTAIN = True
+    TILE_SIZE = (256,256)
+    TEST_IMG_DIR = path+'/hpa_test'
 
-# Make subset dataframes
-sub_df = pd.read_csv(path+'sample_submission.csv')
-sub_df_1728 = sub_df[sub_df.ImageWidth==IMAGE_SIZES[0]]
-sub_df_2048 = sub_df[sub_df.ImageWidth==IMAGE_SIZES[1]]
-sub_df_3072 = sub_df[sub_df.ImageWidth==IMAGE_SIZES[2]]
-submission_ids_1728 = sub_df_1728.ID.to_list()
-submission_ids_2048 = sub_df_2048.ID.to_list()
-submission_ids_3072 = sub_df_3072.ID.to_list()
+    # Make subset dataframes
+    sub_df = pd.read_csv(path+'sample_submission.csv')
+    sub_df_1728 = sub_df[sub_df.ImageWidth==IMAGE_SIZES[0]]
+    sub_df_2048 = sub_df[sub_df.ImageWidth==IMAGE_SIZES[1]]
+    sub_df_3072 = sub_df[sub_df.ImageWidth==IMAGE_SIZES[2]]
+    submission_ids_1728 = sub_df_1728.ID.to_list()
+    submission_ids_2048 = sub_df_2048.ID.to_list()
+    submission_ids_3072 = sub_df_3072.ID.to_list()
 
-predictions = []
-test_df = pd.DataFrame(columns=["ID"], data=submission_ids_1728+submission_ids_2048+submission_ids_3072)
-segmentator = cellsegmentator.CellSegmentator(NUC_MODEL, CELL_MODEL, scale_factor=0.25, padding=True)
+    predictions = []
+    test_df = pd.DataFrame(columns=["ID"], data=submission_ids_1728+submission_ids_2048+submission_ids_3072)
+    #segmentator = cellsegmentator.CellSegmentator(path+NUC_MODEL, path+CELL_MODEL, scale_factor=0.25, padding=True)
 
-for submission_ids in [submission_ids_1728, submission_ids_2048, submission_ids_3072]:
-    for i in tqdm(range(0, len(submission_ids), BATCH_SIZE), total=int(np.ceil(len(submission_ids)/BATCH_SIZE))):
-        
-        # Step 0: Get batch of images as numpy arrays
-        batch_rgby_images = [ Image.open(os.path(path+'test/'+ID+".png"))
-            for ID in submission_ids[i:(i+BATCH_SIZE)]
-        ]
+    for submission_ids in [submission_ids_1728, submission_ids_2048, submission_ids_3072]:
+        for i in tqdm(range(0, len(submission_ids), BATCH_SIZE), total=int(np.ceil(len(submission_ids)/BATCH_SIZE))):
 
-        # Step 1: Do Prediction On Batch
-        cell_segmentations = segmentator.pred_cells(batch_rgby_images)
-        nuc_segmentations = segmentator.pred_nuclei(batch_rgby_images)
+            # Step 0: Get batch of images as numpy arrays
+            batch_rgby_images = [
+                #path+'hpa_test/'+ID+".png" \
+                #Image.open(os.path(path+'test/'+ID+".png")) \
+                load_image(ID, TEST_IMG_DIR, testing=True) \
+                for ID in submission_ids[i:(i+BATCH_SIZE)]
+            ]
 
-        # Step 2: Perform Cell Labelling on Batch
-        batch_masks = [label_cell(nuc_seg, cell_seg)[1].astype(np.uint8) for nuc_seg, cell_seg in zip(nuc_segmentations, cell_segmentations)]
-        
-        # Step 3: Reshape the RGBY Images so They Are Channels Last Across the Batch
-        #batch_rgb_images = [rgby_image.transpose(1,2,0)[..., :-1] for rgby_image in batch_rgby_images]
+            # Step 1: Do Prediction On Batch
+            #cell_segmentations = segmentator.pred_cells([[rgby_image[j] for rgby_image in batch_rgby_images] for j in [0, 3, 2]])
+            #nuc_segmentations = segmentator.pred_nuclei([rgby_image[2] for rgby_image in batch_rgby_images])
+            # Perform Cell Labelling on Batch
+            #batch_masks = [label_cell(nuc_seg, cell_seg)[1].astype(np.uint8) for nuc_seg, cell_seg in zip(nuc_segmentations, cell_segmentations)]
+            #[np.savez_compressed(path+'/hpa_test_masks/'+filename, mask) for (filename, mask) in zip(submission_ids[i:(i+BATCH_SIZE)], batch_masks)]
 
-        # Step 4: Generate Submission RLEs For the Batch
-        submission_rles = [[binary_mask_to_ascii(mask, mask_val=cell_id) for cell_id in range(1, mask.max()+1)] for mask in batch_masks]
+            # Step 2: Alternatively load masks from disk.
+            batch_masks = [np.load(path+'/hpa_test_masks/'+filename+'.npz')['arr_0'] for filename in submission_ids[i:(i+BATCH_SIZE)]]
+            
+            # Step 3: Reshape the RGBY Images so They Are Channels Last Across the Batch
+            batch_rgb_images = [rgby_image.transpose(1,2,0)[..., :-1] for rgby_image in batch_rgby_images]
 
-        # Step 5: Get Bounding Boxes For All Cells in All Images in Batch
-        batch_cell_bboxes = [get_contour_bbox_from_raw(mask) for mask in batch_masks]
+            # Step 4: Generate Submission RLEs For the Batch
+            submission_rles = [[binary_mask_to_ascii(mask, mask_val=cell_id) for cell_id in range(1, mask.max()+1)] for mask in batch_masks]
 
-        # Step 6: Cut Out, Pad to Square, and Resize.
-        batch_cell_tiles = [[
-            cv2.resize(
-                pad_to_square(
-                    rgb_image[bbox[1]:bbox[3], bbox[0]:bbox[2], ...]), 
-                TILE_SIZE, interpolation=cv2.INTER_CUBIC) for bbox in bboxes] 
-            for bboxes, rgb_image in zip(batch_cell_bboxes, batch_rgby_images)
-        ]
+            # Step 5: Get Bounding Boxes For All Cells in All Images in Batch
+            batch_cell_bboxes = [get_contour_bbox_from_raw(mask) for mask in batch_masks]
 
-        # Step 7: Perform Inference 
-        batch_o_preds = [inference_model.predict(tf.cast(cell_tiles, dtype=tf.float32)) for cell_tiles in batch_cell_tiles]
-        #preds,_ = learn.get_preds(DatasetType.Test)
-        #pred_labels = [' '.join(list([str(i) for i in np.nonzero(row>0.2)[0]])) for row in np.array(preds)]
+            # Step 6: Cut Out, Pad to Square, and Resize.
+            batch_cell_tiles = [[
+                cv2.resize(
+                    pad_to_square(
+                        rgb_image[bbox[1]:bbox[3], bbox[0]:bbox[2], ...]),
+                    TILE_SIZE, interpolation=cv2.INTER_CUBIC) for bbox in bboxes]
+                for bboxes, rgb_image in zip(batch_cell_bboxes, batch_rgb_images)
+            ]
 
-        # Step 8: Post-Process
-        batch_confs = [[pred[np.where(pred>CONF_THRESH)] for pred in o_preds] for o_preds in batch_o_preds]
-        batch_preds = [[np.where(pred>CONF_THRESH)[0] for pred in o_preds] for o_preds in batch_o_preds]
-        if RELABEL_UNCERTAIN:
-            for j, preds in enumerate(batch_preds):
-                for k in range(len(preds)):
-                    if preds[k].size==0:
-                        batch_preds[j][k]=np.array([18,])
-                        batch_confs[j][k]=np.array([1-np.max(batch_o_preds[j][k]),])
-        
-        # Optional Viz Step
-        if IS_DEMO:
-            print("\n... DEMO IMAGE ...\n")
-            plot_predictions(batch_rgb_images[0], batch_masks[0], batch_preds[0], confs=batch_confs[0], fill_alpha=0.2, lbl_as_str=True)
-        
-        # Step 9: Format Predictions To Create Prediction String Easily
-        submission_rles = [flatten_list_of_lists([[m,]*len(p) for m, p in zip(masks, preds)]) for masks, preds in zip(submission_rles, batch_preds)]
-        batch_preds = [flatten_list_of_lists(preds, to_string=True) for preds in batch_preds]
-        batch_confs = [[f"{conf:.4f}" for cell_confs in confs for conf in cell_confs] for confs in batch_confs]
-        
-        # Step 10: Save Predictions to Be Added to Dataframe At The End
-        predictions.extend([" ".join(flatten_list_of_lists(zip(*[preds,confs,masks]))) for preds, confs, masks in zip(batch_preds, batch_confs, submission_rles)])
-        
-test_df["PredictionString"] = predictions
+            # Step 7: Perform Inference
+            batch_o_preds = [[learn.predict(tile) for tile in cell_tiles] for cell_tiles in batch_cell_tiles]
+            #preds,_ = learn.get_preds(DatasetType.Test)
+            #pred_labels = [' '.join(list([str(i) for i in np.nonzero(row>0.2)[0]])) for row in np.array(preds)]
 
-print("\n... TEST DATAFRAME ...\n")
-display(test_df.head(3))
+            # Step 8: Post-Process
+            batch_confs = [[cell[2][np.where(cell[2]>CONF_THRESH)] for cell in image_preds] for image_preds in batch_o_preds]
+            batch_preds = [[np.where(cell[2]>CONF_THRESH)[0] for cell in image_preds] for image_preds in batch_o_preds]
+            #if RELABEL_UNCERTAIN:
+            #    for j, preds in enumerate(batch_preds):
+            #        for k in range(len(preds)):
+            #            if preds[k].size==0:
+            #                batch_preds[j][k]=np.array([18,])
+            #                batch_confs[j][k]=np.array([1-np.max(batch_o_preds[j][k]),])
+
+            # Optional Viz Step
+            #print("\n... DEMO IMAGE ...\n")
+            #plot_predictions(batch_rgb_images[0], batch_masks[0], batch_preds[0], confs=batch_confs[0], fill_alpha=0.2, lbl_as_str=True)
+
+            # Step 9: Format Predictions To Create Prediction String Easily
+            submission_rles = [flatten_list_of_lists([[m,]*len(p) for m, p in zip(masks, preds)]) for masks, preds in zip(submission_rles, batch_preds)]
+            batch_preds = [flatten_list_of_lists(preds, to_string=True) for preds in batch_preds]
+            batch_confs = [[f"{conf:.4f}" for cell_confs in confs for conf in cell_confs] for confs in batch_confs]
+
+            # Step 10: Save Predictions to Be Added to Dataframe At The End
+            # ImageAID,ImageAWidth,ImageAHeight,class_0 1 rle_encoded_cell_1_mask class_14 1 rle_encoded_cell_1_mask 0 1 rle encoded_cell_2_mask
+            predictions.extend([" ".join(flatten_list_of_lists(zip(*[preds,confs,masks]))) for preds, confs, masks in zip(batch_preds, batch_confs, submission_rles)])
+
+    test_df["PredictionString"] = predictions
+    test_df.to_csv(path+'submission.csv')
