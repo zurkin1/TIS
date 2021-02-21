@@ -514,7 +514,7 @@ if __name__ == '__main__':
 
     predictions = []
     test_df = pd.DataFrame(columns=["ID"], data=submission_ids_1728+submission_ids_2048+submission_ids_3072)
-    #segmentator = cellsegmentator.CellSegmentator(path+NUC_MODEL, path+CELL_MODEL, scale_factor=0.25, padding=True)
+    #segmentator = cellsegmentator.CellSegmentator(path+NUC_MODEL, path+CELL_MODEL, scale_factor=0.25, padding=True, device='cuda')
 
     for submission_ids in [submission_ids_1728, submission_ids_2048, submission_ids_3072]:
         for i in tqdm(range(0, len(submission_ids), BATCH_SIZE), total=int(np.ceil(len(submission_ids)/BATCH_SIZE))):
