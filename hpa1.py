@@ -50,16 +50,21 @@ def encode_binary_mask(mask, mask_id=1): #contour, image_shape):
   return base64_str.decode() #'ascii'
 
 
-def read_image(img_name, greencolor='yellow'):
+def read_image(img_name, greencolor='green'):
     global ROOT
-    green = cv2.imread(ROOT+'/test/{}_{}.png'.format(img_name, greencolor), cv2.IMREAD_GRAYSCALE)
-    red = cv2.imread(ROOT+'/test/{}_red.png'.format(img_name), cv2.IMREAD_GRAYSCALE)
-    blue = cv2.imread(ROOT+'/test/{}_blue.png'.format(img_name), cv2.IMREAD_GRAYSCALE)
+    #green = cv2.imread(ROOT+'/test/{}_{}.png'.format(img_name, greencolor), cv2.IMREAD_GRAYSCALE)
+    #red = cv2.imread(ROOT+'/test/{}_red.png'.format(img_name), cv2.IMREAD_GRAYSCALE)
+    #blue = cv2.imread(ROOT+'/test/{}_blue.png'.format(img_name), cv2.IMREAD_GRAYSCALE)
+    red= np.array(Image.open(ROOT+'/test/{}_red.png'.format(img_name)))
+    green = np.array(Image.open(ROOT+'/test/{}_{}.png'.format(img_name, greencolor)))
+    blue = np.array(Image.open(ROOT+'/test/{}_blue.png'.format(img_name)))
+    
     #Handle empty images as Cellpose causes an exception.
     if red.sum() < 500:
         red = blue
-
-    return np.stack((red,green,blue),-1)
+    img = np.stack((red,green,blue),-1)
+    return img.astype(np.uint8)
+    
 
 
 def get_contour_bbox_from_raw(mask):
@@ -142,11 +147,11 @@ def process_image(ids, model, learn, return_dict):
             continue
         
         #Cut Out, Pad to Square, and Resize. The first 'cell' in cell_tiles is the whole image and should be ignored.
-        img = read_image(ID, greencolor='green')
+        #img = read_image(ID, greencolor='green')
         cell_tiles = [
-            cv2.resize(
-                pad_to_square(img[bbox[1]:bbox[3], bbox[0]:bbox[2], ...]),
-                TILE_SIZE, interpolation=cv2.INTER_CUBIC) 
+            #cv2.resize(
+                pad_to_square(img[bbox[1]:bbox[3], bbox[0]:bbox[2], ...])
+            #   ,TILE_SIZE, interpolation=cv2.INTER_CUBIC) 
             for bbox in bboxes]
         
         #Calculate RLEs for all cells ordered by their ID in mask.
@@ -174,12 +179,13 @@ if __name__ == '__main__':
     return_dict = manager.dict()
     df = pd.read_csv(ROOT+'sample_.csv')
     model = cellmodels.Cellpose(gpu=True, model_type='cyto') #, device=DEVICE_ID) #, net_avg=False, torch=True
-    learn = load_learner(ROOT+'train/stage2-rn18.pkl') #'../input/cellpose2/stage2-rn18.pkl')
+    learn = load_learner(ROOT+'train/rn50-1.pkl') #'../input/cellpose2/stage2-rn18.pkl')
     num_processes = 6
     X_test = [name.rstrip('green.png').rstrip('_') for name in (os.listdir(ROOT+'/test/')) if '_green.png' in name]
     X = np.array_split(X_test, num_processes)
     print(f'Split length: {len(X[0])}.')
     processes = []
+
     for rank in range(num_processes):
         p = mp.Process(target=process_image, args=(X[rank],model,learn,return_dict))
         p.start()
@@ -190,5 +196,5 @@ if __name__ == '__main__':
         df.loc[df.ID==k,'PredictionString']=v
 
     #df = df.parallel_apply(process_image, axis=1)
-    df.to_csv('submission.csv', index=False)
+    df.to_csv('/home/dsi/zurkin/data/dataset/submission.csv', index=False)
     print(time.ctime(), len(df))
