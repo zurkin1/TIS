@@ -61,7 +61,7 @@ def read_image(img_name, greencolor='green'):
     
     #Handle empty images as Cellpose causes an exception.
     if red.sum() < 500:
-        red = blue
+        red = np.array(Image.open(ROOT+'/test/{}_yellow.png'.format(img_name)))
     img = np.stack((red,green,blue),-1)
     return img.astype(np.uint8)
     
@@ -115,7 +115,7 @@ def default_rle(img):
 
 def process_image(ids, model, learn, return_dict):
     TILE_SIZE = (256,256)
-    CONF_THRESH = 0.1
+    CONF_THRESH = 0.25
 
     use_GPU = cellmodels.use_gpu()
     print('>>> GPU activated? %d'%use_GPU)
@@ -127,23 +127,27 @@ def process_image(ids, model, learn, return_dict):
     LEARN_INT_2_STR = {x:LEARN_LBL_NAMES[x] for x in np.arange(19)}
     KAGGLE_INT_2_STR = {x:KAGGLE_LBL_NAMES[x] for x in np.arange(19)}
     STR_2_KAGGLE_INT = {v:k for k,v in KAGGLE_INT_2_STR.items()}
-    LEARN_INT_2_KAGGLE_INT = {k:STR_2_KAGGLE_INT[v] for k,v in LEARN_INT_2_STR.items()}
+    #LEARN_INT_2_KAGGLE_INT = {k:STR_2_KAGGLE_INT[v] for k,v in LEARN_INT_2_STR.items()}
+    LEARN_INT_2_KAGGLE_INT = {x:int(LEARN_LBL_NAMES[x]) for x in np.arange(19)}
     # grayscale=0, R=1, G=2, B=3. channels = [cytoplasm, nucleus]
     channels = [1,3] # red, blue. [[2,3], [0,0], [0,0]]
 
 
     for ind, ID in enumerate(ids):
-        print(f'Image: {ind}')
+        print(f'Image: {ind} ', ID)
         img = read_image(ID)
+        if ID == '15b2d2af-949f-4a6b-afdc-28182fd05212':
+            return_dict[ID] = (img.shape, default_rle(img))
+            continue
         #Use cellpose for masks. masks (list of 2D arrays, or single 3D array (if do_3D=True)) – labelled image, where 0=no masks; 1,2,…=mask labels.
         mask, flows, styles, diams = model.eval(img, diameter=200, channels=channels, do_3D=False, progress=None) #flow_threshold=None,
         if mask.max() == 0:
-            return_dict[ID] = default_rle(img)
+            return_dict[ID] = (img.shape, default_rle(img))
             continue
         #Get bounding boxes.
         bboxes = get_contour_bbox_from_raw(mask)
         if (len(bboxes) == 0):
-            return_dict[ID] = default_rle(img)
+            return_dict[ID] = (img.shape, default_rle(img))
             continue
         
         #Cut Out, Pad to Square, and Resize. The first 'cell' in cell_tiles is the whole image and should be ignored.
@@ -170,17 +174,17 @@ def process_image(ids, model, learn, return_dict):
         
         #Save Predictions to Be Added to Dataframe At The End.
         #ImageAID,ImageAWidth,ImageAHeight,class_0 1 rle_encoded_cell_1_mask class_14 1 rle_encoded_cell_1_mask 0 1 rle encoded_cell_2_mask
-        return_dict[ID] = prediction_str
+        return_dict[ID] = (img.shape, prediction_str)
 
 
 if __name__ == '__main__':
     print(time.ctime())
     manager = Manager()
     return_dict = manager.dict()
-    df = pd.read_csv(ROOT+'sample_.csv')
+    df = []
     model = cellmodels.Cellpose(gpu=True, model_type='cyto') #, device=DEVICE_ID) #, net_avg=False, torch=True
-    learn = load_learner(ROOT+'train/rn50-1.pkl') #'../input/cellpose2/stage2-rn18.pkl')
-    num_processes = 6
+    learn = load_learner(ROOT+'train/rn18-1.pkl') #'../input/cellpose2/stage2-rn18.pkl')
+    num_processes = 4
     X_test = [name.rstrip('green.png').rstrip('_') for name in (os.listdir(ROOT+'/test/')) if '_green.png' in name]
     X = np.array_split(X_test, num_processes)
     print(f'Split length: {len(X[0])}.')
@@ -193,8 +197,9 @@ if __name__ == '__main__':
     for p in processes:
         p.join()
     for k,v in return_dict.items():
-        df.loc[df.ID==k,'PredictionString']=v
+        #df.loc[df.ID==k,'PredictionString']=v
+        df.append([k, v[0][0], v[0][1], v[1]])
 
-    #df = df.parallel_apply(process_image, axis=1)
+    df = pd.DataFrame.from_records(df, columns=['ID', 'ImageWidth', 'ImageHight', 'PredictionString'])
     df.to_csv('/home/dsi/zurkin/data/dataset/submission.csv', index=False)
     print(time.ctime(), len(df))

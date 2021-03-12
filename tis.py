@@ -24,6 +24,7 @@ import cv2
 import pylab
 from scipy import ndimage
 import subprocess
+import random
 
 
 batch_size=32 # 64
@@ -150,7 +151,38 @@ def prepare_data(csv_file='1045.csv'):
     #df.to_csv(dest_dir+'/data_v1.csv')
     df2.to_csv(dest_dir+'/data_v2.csv')
 
+
+def prepare_data2():
+    source_path = '/home/dsi/zurkin/data/train/'
+    dest_dir = '/home/dsi/zurkin/data/train_1/'
+    DIRS = ["nucleoplasm", "nuclear_membrane", "nucleoli", "nucleoli_fibrillar_center", "nuclear_speckles",\
+            "nuclear_bodies", "endoplasmic_reticulum", "golgi_apparatus", "intermediate_filaments", "actin_filaments",\
+            "microtubules", "mitotic_spindle", "centrosome", "plasma_membrane", "mitochondria", "aggresome", "cytosol",\
+            "vesicles", "negative"]
+    for dir1 in DIRS:
+        os.mkdir(dest_dir+dir1)
+        X = [name for name in (os.listdir(source_path+dir1)) if '_1.png' in name]
+        #sample_size=min(len(X), 500)
+        #X = random.sample(X, sample_size)
+        print(f'{dir1}: {len(X)}')
+        for file in X:
+            shutil.copy(f'{source_path}/{dir1}/{file}', f'{dest_dir}/{dir1}/{file}')
+        #print(dirs)
+        #print(files)
+
+
+    #if not os.path.exists(dest_dir):
+    #    os.mkdir(dest_dir)
+    #    for d in ['/train/', '/validate/', '/test/']:
+    #        os.mkdir(dest_dir+d)
+    #        for l in ['low', 'high']:
+    #            os.mkdir(dest_dir+d+l)
     
+    #for ind, row in df2.iterrows():
+    #    if os.path.isfile(root_path+row['image']):
+    #        shutil.copy(root_path+row['image'], f'{dest_dir}/{row.group}/{row.bin_score}/{str(round(row.score,2))}_{row.image}') # {row[5]}/{row[3]}/{row[0]}')
+
+
 class TisDataset(Dataset):
     def __init__(self, csv_file, root, phase, transform=None):
         """
@@ -347,12 +379,13 @@ def predict():
 if __name__ == "__main__":
     #particle_count()
     #prepare_data()
+    prepare_data2()
 
     #Resnet. 
     #model = models.resnet34(pretrained=True)
     #num_ftrs = model.fc.in_features
     #model.fc = nn.Linear(num_ftrs, 1)
-    
+    """    
     #Alexnet.
     model = models.alexnet(pretrained=True)
     #ft = list(model.features)
@@ -386,3 +419,4 @@ if __name__ == "__main__":
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=7, gamma=0.1)
     train_model(model, criterion, optimizer_ft, exp_lr_scheduler, num_epochs=100)
     predict()
+    """
