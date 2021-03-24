@@ -20,6 +20,10 @@ import matplotlib.pyplot as plt
 import cv2
 import torch.multiprocessing as mp
 from torch.multiprocessing import Manager
+from torchvision.utils import make_grid, save_image
+from torchvision import transforms
+from gradcam.utils import visualize_cam
+from gradcam import GradCAM
 
 
 ROOT = '/home/dsi/zurkin/data/'
@@ -58,11 +62,12 @@ def read_image(img_name, greencolor='green'):
     red= np.array(Image.open(ROOT+'/test/{}_red.png'.format(img_name)))
     green = np.array(Image.open(ROOT+'/test/{}_{}.png'.format(img_name, greencolor)))
     blue = np.array(Image.open(ROOT+'/test/{}_blue.png'.format(img_name)))
+    yellow = np.array(Image.open(ROOT+'/test/{}_yellow.png'.format(img_name)))
     
     #Handle empty images as Cellpose causes an exception.
     if red.sum() < 500:
         red = np.array(Image.open(ROOT+'/test/{}_yellow.png'.format(img_name)))
-    img = np.stack((red,green,blue),-1)
+    img = np.stack((red,green,blue,yellow),-1)
     return img.astype(np.uint8)
     
 
@@ -113,6 +118,42 @@ def default_rle(img):
     return sp
 
 
+class Hook():
+    def __init__(self,m):
+        self.hook = m.register_forward_hook(self.hook_func)
+    def hook_func(self,m,i,o):
+        self.stored = o.detach().clone()
+    def __enter__(self, *args): return self
+    def __exit__(self, *args):
+        self.hook.remove()
+
+
+class PILImageRGBA(PILImage): _show_args, _open_args = {'cmap': 'P'}, {'mode': 'RGBA'}
+
+
+def visualize_cam1(mask, img, alpha=1.0):
+    """Make heatmap from mask and synthesize GradCAM result image using heatmap and img.
+    Args:
+        mask (torch.tensor): mask shape of (1, 1, H, W) and each element has value in range [0, 1]
+        img (torch.tensor): img shape of (1, 3, H, W) and each pixel value is in range [0, 1]
+
+    Return:
+        heatmap (torch.tensor): heatmap img shape of (3, H, W)
+        result (torch.tensor): synthesized GradCAM result of same shape with heatmap.
+    """
+    heatmap = (255 * mask.squeeze()).type(torch.uint8).cpu().detach().numpy()
+    heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+    heatmap = torch.from_numpy(heatmap).permute(2, 0, 1).float().div(255)
+    b, g, r = heatmap.split(1)
+    heatmap = torch.cat([r, g, b]) * alpha
+
+    result = heatmap+img[0][0:3,:,:].cpu()
+    result = result.div(result.max()).squeeze()
+    Image.fromarray(np.rollaxis(np.uint8(result*255), 0, 3)).save('result.png')
+
+    #return heatmap, result
+
+
 def process_image(ids, model, learn, return_dict):
     TILE_SIZE = (256,256)
     CONF_THRESH = 0.25
@@ -145,25 +186,40 @@ def process_image(ids, model, learn, return_dict):
             return_dict[ID] = (img.shape, default_rle(img))
             continue
         #Get bounding boxes.
-        bboxes = get_contour_bbox_from_raw(mask)
-        if (len(bboxes) == 0):
-            return_dict[ID] = (img.shape, default_rle(img))
-            continue
+        #bboxes = get_contour_bbox_from_raw(mask)
+        #if (len(bboxes) == 0):
+        #    return_dict[ID] = (img.shape, default_rle(img))
+        #    continue
         
         #Cut Out, Pad to Square, and Resize. The first 'cell' in cell_tiles is the whole image and should be ignored.
         #img = read_image(ID, greencolor='green')
-        cell_tiles = [
-            #cv2.resize(
-                pad_to_square(img[bbox[1]:bbox[3], bbox[0]:bbox[2], ...])
-            #   ,TILE_SIZE, interpolation=cv2.INTER_CUBIC) 
-            for bbox in bboxes]
+        #cell_tiles = [
+        #    #cv2.resize(
+        #        pad_to_square(img[bbox[1]:bbox[3], bbox[0]:bbox[2], ...])
+        #    #   ,TILE_SIZE, interpolation=cv2.INTER_CUBIC) 
+        #    for bbox in bboxes]
         
         #Calculate RLEs for all cells ordered by their ID in mask.
         rles = [encode_binary_mask(mask, mask_id) for mask_id in range(mask.max())]
         
-        #Get slide predictions.
+        #Get image predictions. For each class find its explainable cells.
         #('nucleoplasm', tensor(16), tensor([2.0571e-02, 2.7850e-03, 3.8773e-02, 1.0485e-01, 2.2821e-02, 6.9570e-02,...]))
-        _preds = [learn.predict(tile) for tile in cell_tiles]
+        _preds = learn.predict(img) #[learn.predict(tile) for tile in cell_tiles]
+        torch_img = transforms.Compose([transforms.ToTensor()])(Image.fromarray(img))[None] # .cuda() transforms.Resize((460, 460)),
+        #normed_torch_img = transforms.Normalize([0.485, 0.456, 0.406, 0.456], [0.229, 0.224, 0.225, 0.224])(torch_img)[None]
+        for clsid in _preds[0]:
+            class_idx = LEARN_LBL_NAMES.items.index(clsid)
+            target_layer = learn.model[0]
+            gradcam = GradCAM(learn.model, target_layer)
+            mask_cam = gradcam(torch_img, class_idx=class_idx) #[0] Gradcam mask for one predicted class.
+            #visualize_cam1(mask_cam[0], torch_img)
+            mask_cam = mask_cam[0].numpy()
+            explanation_thresh = np.quantile(mask_cam, 0.9)
+            mask_cam = np.where(mask_cam>explanation_thresh, 1, 0) #Select only highly explaining regions.
+            #Find cells with high explanation.
+            explained_cells = np.histogram(mask_cam * mask, bins=19) #Multiply by Cellpose mask to find relevant cells. Calculate histogram,
+            quantile_thresh = np.quantile(explained_cells[0], 0.95) * 0.9 #Select only large overlapping regions.
+            cell_ids = np.where(explained_cells[0] > quantile_thresh)
         
         #Post-Process: keep only highly confidence classes.
         prediction_str = ""
@@ -183,13 +239,13 @@ if __name__ == '__main__':
     return_dict = manager.dict()
     df = []
     model = cellmodels.Cellpose(gpu=True, model_type='cyto') #, device=DEVICE_ID) #, net_avg=False, torch=True
-    learn = load_learner(ROOT+'train/rn18-1.pkl') #'../input/cellpose2/stage2-rn18.pkl')
+    learn = load_learner(ROOT+'train/baseline.pkl') #'../input/cellpose2/stage2-rn18.pkl')
     num_processes = 4
     X_test = [name.rstrip('green.png').rstrip('_') for name in (os.listdir(ROOT+'/test/')) if '_green.png' in name]
     X = np.array_split(X_test, num_processes)
     print(f'Split length: {len(X[0])}.')
     processes = []
-
+    """
     for rank in range(num_processes):
         p = mp.Process(target=process_image, args=(X[rank],model,learn,return_dict))
         p.start()
@@ -199,7 +255,8 @@ if __name__ == '__main__':
     for k,v in return_dict.items():
         #df.loc[df.ID==k,'PredictionString']=v
         df.append([k, v[0][0], v[0][1], v[1]])
-
+    """
+    process_image([X_test[0]],model,learn,return_dict)
     df = pd.DataFrame.from_records(df, columns=['ID', 'ImageWidth', 'ImageHight', 'PredictionString'])
     df.to_csv('/home/dsi/zurkin/data/dataset/submission.csv', index=False)
     print(time.ctime(), len(df))
