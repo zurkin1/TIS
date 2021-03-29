@@ -12,23 +12,35 @@ from fastai.callback.mixup import *
 from timm import create_model
 import albumentations, timm
 from fastai.metrics import accuracy_multi
+import os
 
-train_root = '/home/dsi/zurkin/data/train/train/'
-df = pd.read_csv('/home/dsi/zurkin/data/train/train.csv')
-# df = df.sample(frac=0.4).reset_index(drop=True)
-item_tfms = RandomResizedCrop(460, min_scale=0.75, ratio=(1.,1.))
-batch_tfms = [*aug_transforms(size=320, flip_vert=True, max_lighting=0.1, max_zoom=1.05, max_warp=0.1), 
-              Normalize.from_stats([0.485, 0.456, 0.406, 0.456], [0.229, 0.224, 0.225, 0.224])]
 
-class PILImageRGBA(PILImage): _show_args, _open_args = {'cmap': 'P'}, {'mode': 'RGBA'}
-cells = DataBlock(blocks=(ImageBlock(PILImageRGBA), MultiCategoryBlock),
-                   get_x=ColReader(0, pref=train_root, suff='.png'),
-                   splitter=RandomSplitter(),
-                   get_y=ColReader(1, label_delim='|'),
-                   batch_tfms = batch_tfms)
+root = '/home/dsi/zurkin/data/train_p/'
 
-dls = cells.dataloaders(df)
-#dls.show_batch()
+
+def get_data(df=True):
+    if df:
+        df = pd.read_csv(root+'../train.csv')
+    #df = os.listdir(root)
+    #df = pd.DataFrame(df, columns=['ID'])
+    #df['Label'] = '0'
+
+    # df = df.sample(frac=0.4).reset_index(drop=True)
+    #item_tfms = RandomResizedCrop(460, min_scale=0.75, ratio=(1.,1.))
+    batch_tfms = [*aug_transforms(size=320, flip_vert=True, max_lighting=0.1, max_zoom=1.05, max_warp=0.1), 
+                  Normalize.from_stats([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])] #, 0.456 , 0.224
+
+    #class PILImageRGBA(PILImage): _show_args, _open_args = {'cmap': 'P'}, {'mode': 'RGBA'}
+    cells = DataBlock(blocks=(ImageBlock(PILImage), MultiCategoryBlock),
+                       get_x=ColReader(0, pref=root, suff='.png'),
+                       splitter=RandomSplitter(),
+                       get_y=ColReader(1, label_delim='|'),
+                       #item_tfms = item_tfms,
+                       batch_tfms = batch_tfms)
+
+    dls = cells.dataloaders(df)
+    #dls.show_batch()
+    return dls
 
 
 def create_timm_body(arch:str, pretrained=True, cut=None):
@@ -40,11 +52,11 @@ def create_timm_body(arch:str, pretrained=True, cut=None):
     elif callable(cut): return cut(model)
     else: raise NamedError("cut must be either integer or function")
         
-def get_model():
-    body = create_timm_body('resnext50d_32x4d', pretrained=True)
-    w = body[0][0].weight
-    body[0][0] = nn.Conv2d(4, 32, kernel_size=(3, 3), stride=2, padding=1, bias=False)
-    body[0][0].weight = nn.Parameter(torch.cat([w, nn.Parameter(torch.mean(w, axis=1).unsqueeze(1))], axis=1))
+def get_model(dls):
+    body = create_timm_body('resnet50', pretrained=True) #resnext50d_32x4d
+    #w = body[0][0].weight
+    #body[0][0] = nn.Conv2d(4, 32, kernel_size=(3, 3), stride=2, padding=1, bias=False)
+    #body[0][0].weight = nn.Parameter(torch.cat([w, nn.Parameter(torch.mean(w, axis=1).unsqueeze(1))], axis=1))
     nf = num_features_model(nn.Sequential(*body.children())) #* (2)
     head = create_head(nf, dls.c)
     model = nn.Sequential(body, head)
@@ -52,8 +64,17 @@ def get_model():
     return model
 
 
-learn = Learner(dls, get_model(), loss_func=BCEWithLogitsLossFlat(), metrics=[accuracy_multi, PrecisionMulti()], splitter=default_split).to_fp16() #clip=0.5
-learn.freeze()
-print(learn.lr_find())
-learn.fine_tune(10, base_lr=1e-2, freeze_epochs=1, cbs=[EarlyStoppingCallback(patience=3), SaveModelCallback(monitor='accuracy_multi')])
-learn.export('baseline')
+if __name__ == '__main__':
+    #File check.
+    #for file in os.listdir(root):
+    #    try:
+    #        im = Image.open(root+file)
+    #        im.verify()
+    #    except:
+    #        print(file)
+    dls = get_data()
+    learn = Learner(dls, get_model(dls), loss_func=BCEWithLogitsLossFlat(), metrics=[accuracy_multi, PrecisionMulti()], splitter=default_split).to_fp16() #clip=0.5
+    #learn.freeze()
+    #print(learn.lr_find())
+    learn.fine_tune(20, base_lr=3e-2, freeze_epochs=1, cbs=[SaveModelCallback(monitor='accuracy_multi')]) #EarlyStoppingCallback(patience=3), 
+    learn.export('baseline')

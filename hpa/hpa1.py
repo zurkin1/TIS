@@ -26,7 +26,7 @@ from gradcam.utils import visualize_cam
 from gradcam import GradCAM
 
 
-ROOT = '/home/dsi/zurkin/data/'
+ROOT = '/home/dsi/zurkin/data/test_p/'
 torch.multiprocessing.set_start_method('spawn', force=True)
 
 
@@ -59,14 +59,14 @@ def read_image(img_name, greencolor='green'):
     #green = cv2.imread(ROOT+'/test/{}_{}.png'.format(img_name, greencolor), cv2.IMREAD_GRAYSCALE)
     #red = cv2.imread(ROOT+'/test/{}_red.png'.format(img_name), cv2.IMREAD_GRAYSCALE)
     #blue = cv2.imread(ROOT+'/test/{}_blue.png'.format(img_name), cv2.IMREAD_GRAYSCALE)
-    red= np.array(Image.open(ROOT+'/test/{}_red.png'.format(img_name)))
-    green = np.array(Image.open(ROOT+'/test/{}_{}.png'.format(img_name, greencolor)))
-    blue = np.array(Image.open(ROOT+'/test/{}_blue.png'.format(img_name)))
-    yellow = np.array(Image.open(ROOT+'/test/{}_yellow.png'.format(img_name)))
+    red= np.array(Image.open(ROOT+'{}_red.png'.format(img_name)))
+    green = np.array(Image.open(ROOT+'{}_{}.png'.format(img_name, greencolor)))
+    blue = np.array(Image.open(ROOT+'{}_blue.png'.format(img_name)))
+    yellow = np.array(Image.open(ROOT+'{}_yellow.png'.format(img_name)))
     
     #Handle empty images as Cellpose causes an exception.
     if red.sum() < 500:
-        red = np.array(Image.open(ROOT+'/test/{}_yellow.png'.format(img_name)))
+        red = np.array(Image.open(ROOT+'{}_yellow.png'.format(img_name)))
     img = np.stack((red,green,blue,yellow),-1)
     return img.astype(np.uint8)
     
@@ -156,7 +156,7 @@ def visualize_cam1(mask, img, alpha=1.0):
 
 def process_image(ids, model, learn, return_dict):
     TILE_SIZE = (256,256)
-    CONF_THRESH = 0.25
+    CONF_THRESH = 0.1
 
     use_GPU = cellmodels.use_gpu()
     print('>>> GPU activated? %d'%use_GPU)
@@ -173,15 +173,15 @@ def process_image(ids, model, learn, return_dict):
     # grayscale=0, R=1, G=2, B=3. channels = [cytoplasm, nucleus]
     channels = [1,3] # red, blue. [[2,3], [0,0], [0,0]]
 
-
     for ind, ID in enumerate(ids):
         print(f'Image: {ind} ', ID)
-        img = read_image(ID)
+        img = Image.open(ROOT+'{}.png'.format(ID))
         if ID == '15b2d2af-949f-4a6b-afdc-28182fd05212':
             return_dict[ID] = (img.shape, default_rle(img))
             continue
+        img_array = np.array(img) #np.transpose(, (2,0,1))
         #Use cellpose for masks. masks (list of 2D arrays, or single 3D array (if do_3D=True)) – labelled image, where 0=no masks; 1,2,…=mask labels.
-        mask, flows, styles, diams = model.eval(img, diameter=200, channels=channels, do_3D=False, progress=None) #flow_threshold=None,
+        mask, flows, styles, diams = model.eval(img_array, diameter=200, channels=channels, do_3D=False, progress=None) #flow_threshold=None,
         if mask.max() == 0:
             return_dict[ID] = (img.shape, default_rle(img))
             continue
@@ -202,32 +202,48 @@ def process_image(ids, model, learn, return_dict):
         #Calculate RLEs for all cells ordered by their ID in mask.
         rles = [encode_binary_mask(mask, mask_id) for mask_id in range(mask.max())]
         
-        #Get image predictions. For each class find its explainable cells.
+        #Get image predictions.
         #('nucleoplasm', tensor(16), tensor([2.0571e-02, 2.7850e-03, 3.8773e-02, 1.0485e-01, 2.2821e-02, 6.9570e-02,...]))
-        _preds = learn.predict(img) #[learn.predict(tile) for tile in cell_tiles]
-        torch_img = transforms.Compose([transforms.ToTensor()])(Image.fromarray(img))[None] # .cuda() transforms.Resize((460, 460)),
-        #normed_torch_img = transforms.Normalize([0.485, 0.456, 0.406, 0.456], [0.229, 0.224, 0.225, 0.224])(torch_img)[None]
-        for clsid in _preds[0]:
-            class_idx = LEARN_LBL_NAMES.items.index(clsid)
+        #for i in range(3):
+        #    img[i,:,:] -= imagenet_stats[0][i]
+        #    img[i,:,:] /= imagenet_stats[1][i]
+        _preds = learn.predict(img_array) #[learn.predict(tile) for tile in cell_tiles]
+        torch_img = transforms.Compose([transforms.ToTensor()])(img)[None] # .cuda() transforms.Resize((460, 460)),
+        normed_torch_img = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])(torch_img)[None] #, 0.456 , 0.224
+
+        #For each class find its explainable cells.
+        prediction_str = ""
+        all_cell_ids = np.array([])
+        for class_idx in (np.where(_preds[2]>CONF_THRESH))[0]:
+            #Get explanation.
+            #class_idx = LEARN_LBL_NAMES.items.index(clsid)
+            clsid = LEARN_LBL_NAMES[class_idx]
             target_layer = learn.model[0]
             gradcam = GradCAM(learn.model, target_layer)
-            mask_cam = gradcam(torch_img, class_idx=class_idx) #[0] Gradcam mask for one predicted class.
+            mask_cam = gradcam(normed_torch_img[0], class_idx=class_idx) #[0] Gradcam mask for one predicted class.
             #visualize_cam1(mask_cam[0], torch_img)
             mask_cam = mask_cam[0].numpy()
+
+            #Select only highly explaining regions.
             explanation_thresh = np.quantile(mask_cam, 0.9)
-            mask_cam = np.where(mask_cam>explanation_thresh, 1, 0) #Select only highly explaining regions.
-            #Find cells with high explanation.
-            explained_cells = np.histogram(mask_cam * mask, bins=19) #Multiply by Cellpose mask to find relevant cells. Calculate histogram,
-            quantile_thresh = np.quantile(explained_cells[0], 0.95) * 0.9 #Select only large overlapping regions.
+            mask_cam = np.where(mask_cam>explanation_thresh, 1, 0)
+
+            #Find cells with high explanation. Multiply by Cellpose mask to find relevant cells. Calculate histogram and select only large overlapping regions.
+            explained_cells = np.histogram(mask_cam * mask, bins=[i-0.1 for i in range(19)])
+            quantile_thresh = np.quantile(explained_cells[0], 0.95) * 0.9
             cell_ids = np.where(explained_cells[0] > quantile_thresh)
-        
-        #Post-Process: keep only highly confidence classes.
-        prediction_str = ""
-        for i in range(1, len(cell_tiles)):
-            classes = np.where(_preds[i][2]>CONF_THRESH)[0]
-            for j in classes:
-                prediction_str+=f'{LEARN_INT_2_KAGGLE_INT[j]} {_preds[i][2][j].item()} {rles[i]} '
-        
+
+            #For each explaining cell build its prediction string.
+            for i in cell_ids: #range(1, len(cell_tiles)):
+                #classes = np.where(_preds[i][2]>CONF_THRESH)[0]
+                #for j in classes:
+                prediction_str+=f'{LEARN_INT_2_KAGGLE_INT[int(clsid)]} {_preds[2][class_idx].item()} {rles[i[0]]} '
+                all_cell_ids = np.append(all_cell_ids, int(i))
+
+        #For unexplained cells use a negative class.
+        for i in set(range(mask.max())) - set(all_cell_ids):
+            prediction_str+=f' 18 0.1 {rles[i]}'
+
         #Save Predictions to Be Added to Dataframe At The End.
         #ImageAID,ImageAWidth,ImageAHeight,class_0 1 rle_encoded_cell_1_mask class_14 1 rle_encoded_cell_1_mask 0 1 rle encoded_cell_2_mask
         return_dict[ID] = (img.shape, prediction_str)
@@ -239,9 +255,10 @@ if __name__ == '__main__':
     return_dict = manager.dict()
     df = []
     model = cellmodels.Cellpose(gpu=True, model_type='cyto') #, device=DEVICE_ID) #, net_avg=False, torch=True
-    learn = load_learner(ROOT+'train/baseline.pkl') #'../input/cellpose2/stage2-rn18.pkl')
-    num_processes = 4
-    X_test = [name.rstrip('green.png').rstrip('_') for name in (os.listdir(ROOT+'/test/')) if '_green.png' in name]
+    learn = load_learner('baseline') #'../input/cellpose2/stage2-rn18.pkl')
+    num_processes = 1
+    X_test = [name.rstrip('.png') for name in (os.listdir(ROOT)) if '.png' in name]
+    X_test = pd.DataFrame(X_test, columns=['ID'])
     X = np.array_split(X_test, num_processes)
     print(f'Split length: {len(X[0])}.')
     processes = []
@@ -256,7 +273,7 @@ if __name__ == '__main__':
         #df.loc[df.ID==k,'PredictionString']=v
         df.append([k, v[0][0], v[0][1], v[1]])
     """
-    process_image([X_test[0]],model,learn,return_dict)
+    process_image([X_test.ID.iloc[17]],model,learn,return_dict)
     df = pd.DataFrame.from_records(df, columns=['ID', 'ImageWidth', 'ImageHight', 'PredictionString'])
     df.to_csv('/home/dsi/zurkin/data/dataset/submission.csv', index=False)
     print(time.ctime(), len(df))
