@@ -27,7 +27,7 @@ def get_data(df=True):
 
     # df = df.sample(frac=0.4).reset_index(drop=True)
     #item_tfms = RandomResizedCrop(460, min_scale=0.75, ratio=(1.,1.))
-    batch_tfms = [*aug_transforms(size=320, flip_vert=True, max_lighting=0.1, max_zoom=1.05, max_warp=0.1), 
+    batch_tfms = [*aug_transforms(size=320, flip_vert=True, max_lighting=0.1, max_zoom=1.05, max_warp=0.1),
                   Normalize.from_stats([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])] #, 0.456 , 0.224
 
     #class PILImageRGBA(PILImage): _show_args, _open_args = {'cmap': 'P'}, {'mode': 'RGBA'}
@@ -51,7 +51,7 @@ def create_timm_body(arch:str, pretrained=True, cut=None):
     if isinstance(cut, int): return nn.Sequential(*list(model.children())[:cut])
     elif callable(cut): return cut(model)
     else: raise NamedError("cut must be either integer or function")
-        
+
 def get_model(dls):
     body = create_timm_body('resnet50', pretrained=True) #resnext50d_32x4d
     #w = body[0][0].weight
@@ -76,5 +76,5 @@ if __name__ == '__main__':
     learn = Learner(dls, get_model(dls), loss_func=BCEWithLogitsLossFlat(), metrics=[accuracy_multi, PrecisionMulti()], splitter=default_split).to_fp16() #clip=0.5
     #learn.freeze()
     #print(learn.lr_find())
-    learn.fine_tune(20, base_lr=3e-2, freeze_epochs=1, cbs=[SaveModelCallback(monitor='accuracy_multi')]) #EarlyStoppingCallback(patience=3), 
+    learn.fine_tune(20, base_lr=3e-2, freeze_epochs=1, cbs=[SaveModelCallback(monitor='accuracy_multi')]) #EarlyStoppingCallback(patience=3),
     learn.export('baseline')

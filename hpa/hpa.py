@@ -36,7 +36,7 @@ src = ImageDataLoaders.from_folder(path, valid_pct=0.05, item_tfms=item_tfms, ba
 #learn = cnn_learner(dls, resnet50, metrics=[accuracy_multi, PrecisionMulti()]).to_fp16()
 #df = pd.read_csv(path+'train_single_class.csv')
 #clweight = compute_class_weight('balanced', classes=range(0,19), y=df.Label.values)
-loss_func = FocalLossFlat(gamma=2) #weight=torch.FloatTensor(clweight).cuda(), 
+loss_func = FocalLossFlat(gamma=2) #weight=torch.FloatTensor(clweight).cuda(),
 learn = cnn_learner(src, resnet18, path=path, metrics=[accuracy, F1Score(average='weighted')], loss_func=loss_func) #cut=-2, splitter=_resnet_split, loss_func=F.binary_cross_entropy_with_logits, metrics=[f1score_multi, Precision(average='weighted')]
 
 #print(learn.lr_find(suggestions=True))
