@@ -24,6 +24,7 @@ from torchvision.utils import make_grid, save_image
 from torchvision import transforms
 from gradcam.utils import visualize_cam
 from gradcam import GradCAM
+import sys
 
 
 ROOT = '/home/dsi/zurkin/data/test/'
@@ -59,18 +60,21 @@ def read_image(img_name, greencolor='green'):
     #green = cv2.imread(ROOT+'/test/{}_{}.png'.format(img_name, greencolor), cv2.IMREAD_GRAYSCALE)
     #red = cv2.imread(ROOT+'/test/{}_red.png'.format(img_name), cv2.IMREAD_GRAYSCALE)
     #blue = cv2.imread(ROOT+'/test/{}_blue.png'.format(img_name), cv2.IMREAD_GRAYSCALE)
+    yellow = Image.open(ROOT+'{}_yellow.png'.format(img_name))
+    """
     red= np.array(Image.open(ROOT+'{}_red.png'.format(img_name)).resize((512,512)))
     green = np.array(Image.open(ROOT+'{}_{}.png'.format(img_name, greencolor)).resize((512,512)))
     blue = np.array(Image.open(ROOT+'{}_blue.png'.format(img_name)).resize((512,512)))
-    yellow = Image.open(ROOT+'{}_yellow.png'.format(img_name))
     shape = yellow.shape
     #Handle empty images as Cellpose causes an exception.
-    if red.sum() < 500:
+    if red.sum() < 500 or img_name == '15b2d2af-949f-4a6b-afdc-28182fd05212':
         red = np.array(yellow.resize((512,512)))
     img = np.stack((red,green,blue),-1)
     if img.max()>257:
         img = img/256
-    return img.astype(np.uint8), shape
+    """
+    img = np.array(Image.open(ROOT+f'../test_p/{img_name}.png'))
+    return img.astype(np.uint8), yellow.shape
 
 
 
@@ -161,8 +165,8 @@ def process_image(ids, model, learn, return_dict):
     TILE_SIZE = (256,256)
     CONF_THRESH = 0.1
 
-    use_GPU = cellmodels.use_gpu()
-    print('>>> GPU activated? %d'%use_GPU)
+    #use_GPU = cellmodels.use_gpu()
+    #print('>>> GPU activated? %d'%use_GPU)
     LEARN_LBL_NAMES = learn.dls.vocab
     KAGGLE_LBL_NAMES = ["nucleoplasm", "nuclear_membrane", "nucleoli", "nucleoli_fibrillar_center", "nuclear_speckles",\
                         "nuclear_bodies", "endoplasmic_reticulum", "golgi_apparatus", "intermediate_filaments", "actin_filaments",\
@@ -177,17 +181,12 @@ def process_image(ids, model, learn, return_dict):
     channels = [1,3] # red, blue. [[2,3], [0,0], [0,0]]
 
     for ind, ID in enumerate(ids):
-        print(f'Image: {ind} ', ID)
         img, orig_shape = read_image(ID)
-        if ID == '15b2d2af-949f-4a6b-afdc-28182fd05212':
-            return_dict[ID] = (orig_shape, default_rle(orig_shape))
-            continue
         #img_array = np.array(img) #np.transpose(, (2,0,1))
         #Use cellpose for masks. masks (list of 2D arrays, or single 3D array (if do_3D=True)) – labelled image, where 0=no masks; 1,2,…=mask labels.
         mask, flows, styles, diams = model.eval(img, diameter=200, channels=channels, do_3D=False, progress=None) #flow_threshold=None,
-        if mask.max() == 0:
-            return_dict[ID] = (orig_shape, default_rle(orig_shape))
-            continue
+        if mask.max() <= 1:
+            mask, flows, styles, diams = model.eval(img, diameter=100, channels=channels, do_3D=False, progress=None)
         #io.save_masks(img, mask, flows, f'mask/{ID}.png')
 
         #Get bounding boxes.
@@ -238,11 +237,11 @@ def process_image(ids, model, learn, return_dict):
             mask_cam = mask_cam[0].numpy()
 
             #Select only highly explaining regions.
-            explanation_thresh = np.quantile(mask_cam, 0.3)
-            mask_cam = np.where(mask_cam>explanation_thresh, 1, 0)
+            #explanation_thresh = np.quantile(mask_cam, 0.1)
+            mask_cam_bin = np.where(mask_cam>0, 1, 0)
 
             #Find cells with high explanation. Multiply by Cellpose mask to find relevant cells. Calculate histogram and select only large overlapping regions.
-            explained_cells = np.histogram(mask_cam * mask, bins=range(mask.max()+2))
+            explained_cells = np.histogram(mask_cam_bin * mask, bins=range(mask.max()+2))
             _thresh = 500 #0.5 * img.shape[0]**2/mask.max() #Approximated cell area in pixels.
             cell_ids = np.where(explained_cells[0] > _thresh)
 
@@ -250,8 +249,10 @@ def process_image(ids, model, learn, return_dict):
             for i in np.delete(cell_ids, 0): #range(1, len(cell_tiles)):
                 #classes = np.where(_preds[i][2]>CONF_THRESH)[0]
                 #for j in classes:
-                prediction_str+=f'{int(clsid)} {_preds[2][class_idx].item()} {rles[i]} ' #LEARN_INT_2_KAGGLE_INT[
-                all_cell_ids = np.append(all_cell_ids, int(i))
+                mask_bin = np.where(mask==i, 1, 0)
+                avg_cam = np.mean(mask_cam * mask_bin)
+                prediction_str+=f'{int(clsid)} {avg_cam*_preds[2][class_idx].item()} {rles[i]} ' #LEARN_INT_2_KAGGLE_INT[
+                all_cell_ids = np.append(all_cell_ids, i)
 
         #For unexplained cells use a negative class.
         for i in set(range(mask.max()+1)) - set(all_cell_ids) - {0}:
@@ -260,6 +261,10 @@ def process_image(ids, model, learn, return_dict):
         #Save Predictions to Be Added to Dataframe At The End.
         #ImageAID,ImageAWidth,ImageAHeight,class_0 1 rle_encoded_cell_1_mask class_14 1 rle_encoded_cell_1_mask 0 1 rle encoded_cell_2_mask
         return_dict[ID] = (orig_shape, prediction_str)
+        print(f'Image: {ind} ', ID, prediction_str[:50])
+        #if ID == 'cd65456d-cdf6-4f99-805d-bfb85c881b24':
+        #    return (orig_shape, default_rle(orig_shape))
+    return (orig_shape, prediction_str)
 
 
 if __name__ == '__main__':
@@ -267,8 +272,9 @@ if __name__ == '__main__':
     manager = Manager()
     return_dict = manager.dict()
     df = []
-    model = cellmodels.Cellpose(gpu=True, model_type='cyto') #, device=DEVICE_ID) #, net_avg=False, torch=True
-    learn = load_learner('baseline') #'../input/cellpose2/stage2-rn18.pkl')
+    #split = int(sys.argv[1])
+    model = cellmodels.Cellpose(gpu=True, model_type='cyto') #) #, net_avg=False, torch=True, device=split
+    learn = load_learner('baseline2') #'../input/cellpose2/stage2-rn18.pkl')
     num_processes = 6
     X_test = [name.rstrip('green.png').rstrip('_') for name in (os.listdir(ROOT)) if 'green.png' in name]
     X = np.array_split(X_test, num_processes)
@@ -285,7 +291,15 @@ if __name__ == '__main__':
     for k,v in return_dict.items():
         #df.loc[df.ID==k,'PredictionString']=v
         df.append([k, v[0][0], v[0][1], v[1]])
-
+    """
+    return_dict = {}
+    torch.cuda.set_device(split)
+    X_test = pd.read_csv(ROOT+'../sample_submission.csv').iloc[(split-1)*100:split*100]['ID'].values
+    #X_test = ['cd65456d-cdf6-4f99-805d-bfb85c881b24', 'cda406d5-178a-4011-b4cc-389ded4dcf27']
+    for ID in tqdm(X_test):
+        ret_val = process_image([ID],model,learn)
+        df.append([ID,ret_val[0][0], ret_val[0][1], ret_val[1]])
+    """
     df = pd.DataFrame.from_records(df, columns=['ID', 'ImageWidth', 'ImageHight', 'PredictionString'])
-    df.to_csv('/home/dsi/zurkin/data/dataset/submission.csv', index=False)
+    df.to_csv(f'/home/dsi/zurkin/data/dataset/submission.csv', index=False)
     print(time.ctime(), len(df))

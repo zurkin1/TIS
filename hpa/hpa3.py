@@ -4,6 +4,9 @@
 #https://www.kaggle.com/skydevour/rgb-model-rgby-cell-level-classification
 #https://www.kaggle.com/thedrcat/cam-class-activation-map-explained-in-pytorch
 #https://medium.com/@JBKani/multi-label-classification-of-human-protein-dataset-using-fastai2-86535f96a607
+#https://www.kaggle.com/c/hpa-single-cell-image-classification/discussion/218309
+#https://www.kaggle.com/c/hpa-single-cell-image-classification/discussion/228635
+#https://www.kaggle.com/lnhtrang/hpa-public-data-download-and-hpacellseg
 
 #!pip install -q timm
 
@@ -15,12 +18,11 @@ from fastai.metrics import accuracy_multi
 import os
 
 
-root = '/home/dsi/zurkin/data/train_p/'
+root = '/home/dsi/zurkin/data/public/' #train_p/'
 
 
-def get_data(df=True):
-    if df:
-        df = pd.read_csv(root+'../train.csv')
+def get_data():
+    df = pd.read_csv(root+'../kaggle2.csv') #train.csv')
     #df = os.listdir(root)
     #df = pd.DataFrame(df, columns=['ID'])
     #df['Label'] = '0'
@@ -32,7 +34,7 @@ def get_data(df=True):
 
     #class PILImageRGBA(PILImage): _show_args, _open_args = {'cmap': 'P'}, {'mode': 'RGBA'}
     cells = DataBlock(blocks=(ImageBlock(PILImage), MultiCategoryBlock),
-                       get_x=ColReader(0, pref=root, suff='.png'),
+                       get_x=ColReader(0, pref=root, suff='.jpg'),
                        splitter=RandomSplitter(),
                        get_y=ColReader(1, label_delim='|'),
                        #item_tfms = item_tfms,
@@ -73,7 +75,9 @@ if __name__ == '__main__':
     #    except:
     #        print(file)
     dls = get_data()
-    learn = Learner(dls, get_model(dls), loss_func=BCEWithLogitsLossFlat(), metrics=[accuracy_multi, PrecisionMulti()], splitter=default_split).to_fp16() #clip=0.5
+    #learn = Learner(dls, get_model(dls), loss_func=BCEWithLogitsLossFlat(), metrics=[accuracy_multi, PrecisionMulti()], splitter=default_split).to_fp16() #clip=0.5
+    learn = load_learner('baseline')
+    learn.dls = dls
     #learn.freeze()
     #print(learn.lr_find())
     learn.fine_tune(20, base_lr=3e-2, freeze_epochs=1, cbs=[SaveModelCallback(monitor='accuracy_multi')]) #EarlyStoppingCallback(patience=3),
