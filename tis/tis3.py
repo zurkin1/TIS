@@ -1,4 +1,3 @@
-from fastai import *
 from fastai.vision import *
 from fastai.metrics import error_rate
 from fastai.vision.models.wrn import wrn_22
@@ -49,29 +48,13 @@ def split(self, split_on:SplitFuncOrIdxList)->None:
         if isinstance(split_on,Callable): split_on = split_on(self.model)
         self.layer_groups = split_model(self.model, split_on)
 
-# def create_cnn(data:DataBunch, arch:Callable, cut:Union[int,Callable]=None, pretrained:bool=True,
-#                 lin_ftrs:Optional[Collection[int]]=None, ps:Floats=0.5,
-#                 custom_head:Optional[nn.Module]=None, split_on:Optional[SplitFuncOrIdxList]=None,
-#                 classification:bool=True, **kwargs:Any):
-#     "Build convnet style learners."
-#     meta = cnn_config(arch)
-#     body = create_body(arch(pretrained))
-#     nf = num_features_model(body) * 2
-#     head = custom_head or create_head(nf, data.c, lin_ftrs, ps)
-#     model = nn.Sequential(body, head)
-#     learn = Learner(data, model, **kwargs)
-#     learn.split(ifnone(split_on,meta['split']))
-#     if pretrained: learn.freeze()
-#     apply_init(model[1], nn.init.kaiming_normal_)
-#     return learn
-
-
 def create_cnn(data:DataBunch, arch:Callable, cut:Union[int,Callable]=None, pretrained:bool=True,
                 lin_ftrs:Optional[Collection[int]]=None, ps:Floats=0.5,
                 custom_head:Optional[nn.Module]=None, split_on:Optional[SplitFuncOrIdxList]=None,
-                classification:bool=True, **kwargs:Any)->None:
+                classification:bool=True, **kwargs:Any):
+    #     "Build convnet style learners."
     meta = cnn_config(arch)
-    body = create_body(arch(pretrained), ifnone(cut,meta['cut']))
+    body = create_body(arch(pretrained), ifnone(cut,meta['cut'])
     nf = num_features_model(body) * 2
     head = custom_head or create_head(nf, data.c, lin_ftrs, ps)
     model = nn.Sequential(body, head)
@@ -80,13 +63,7 @@ def create_cnn(data:DataBunch, arch:Callable, cut:Union[int,Callable]=None, pret
     if pretrained: learn.freeze()
     apply_init(model[1], nn.init.kaiming_normal_)
     return learn
-####################################################################################
-#python -m torch.distributed.launch --nproc_per_node=4 tis2.py
-parser = argparse.ArgumentParser()
-parser.add_argument("--local_rank", type=int)
-args = parser.parse_args()
-torch.cuda.set_device(args.local_rank) # 3
-torch.distributed.init_process_group(backend='nccl', init_method='env://')
+
 
 base_dir = '/home/dsi/zurkin/data4_new/'
 img_dir = Path(base_dir)
@@ -95,7 +72,7 @@ data = ImageDataBunch.from_folder(img_dir, train='train', valid='test', #bs=16,
         ds_tfms=get_transforms(do_flip=True, flip_vert=True, max_rotate=180.0, max_lighting=0.2, p_affine=0.75, p_lighting=0.75)
        ,size=500).normalize() #size=500
 
-learn = cnn_learner(data, models.alexnet, metrics=[AUROC()]) #.to_distributed(args.local_rank)
+learn = cnn_learner(data, models.alexnet, metrics=[AUROC()])
 #learn = load_learner('/home/dsi/zurkin/data2', 'tis.pkl')
 # learn.load(base_dir + '/models/bestmodel')
 # learn.to_fp16()

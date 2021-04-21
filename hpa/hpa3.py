@@ -9,6 +9,7 @@
 #https://www.kaggle.com/lnhtrang/hpa-public-data-download-and-hpacellseg
 
 #!pip install -q timm
+#python -m fastai.launch scriptname.py
 
 from fastai.vision.all import *
 from fastai.callback.mixup import *
@@ -16,9 +17,37 @@ from timm import create_model
 import albumentations, timm
 from fastai.metrics import accuracy_multi
 import os
+from fastai.distributed import *
+from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
+from puzzle_utils import *
+from networks import *
+import torch
+import torch.nn as nn
 
 
 root = '/home/dsi/zurkin/data/public/' #train_p/'
+nfold = 5
+
+
+class AlbumentationsTransform(DisplayedTransform):
+    split_idx,order=0,2
+    def __init__(self, train_aug): store_attr()
+
+    def encodes(self, img: PILImage):
+        aug_img = self.train_aug(image=np.array(img))['image']
+        return PILImage.create(aug_img)
+
+
+def get_train_aug(): return albumentations.Compose([
+            albumentations.HueSaturationValue(
+                hue_shift_limit=0.2,
+                sat_shift_limit=0.2,
+                val_shift_limit=0.2,
+                p=0.5
+            ),
+            albumentations.CoarseDropout(p=0.5),
+            albumentations.RandomContrast(p = 0.6)
+])
 
 
 def get_data():
@@ -26,21 +55,31 @@ def get_data():
     #df = os.listdir(root)
     #df = pd.DataFrame(df, columns=['ID'])
     #df['Label'] = '0'
-
     # df = df.sample(frac=0.4).reset_index(drop=True)
-    #item_tfms = RandomResizedCrop(460, min_scale=0.75, ratio=(1.,1.))
+    labels = [str(i) for i in range(19)]
+    for x in labels: df[x] = df.Label.apply(lambda r: int(x in r.split('|')))
+
+    df['fold'] = np.nan
+    mskf = MultilabelStratifiedKFold(n_splits=nfold)
+    for i, (_, test_index) in enumerate(mskf.split(df['ID'], df[labels])):
+        df.iloc[test_index, -1] = i
+
+    df['fold'] = df['fold'].astype('int')
+    df['is_valid'] = df.fold.apply(lambda x: x==0)
+
+    item_tfms = AlbumentationsTransform(get_train_aug()) #RandomResizedCrop(460, min_scale=0.75, ratio=(1.,1.))
     batch_tfms = [*aug_transforms(size=320, flip_vert=True, max_lighting=0.1, max_zoom=1.05, max_warp=0.1),
                   Normalize.from_stats([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])] #, 0.456 , 0.224
 
     #class PILImageRGBA(PILImage): _show_args, _open_args = {'cmap': 'P'}, {'mode': 'RGBA'}
     cells = DataBlock(blocks=(ImageBlock(PILImage), MultiCategoryBlock),
-                       get_x=ColReader(0, pref=root, suff='.jpg'),
-                       splitter=RandomSplitter(),
-                       get_y=ColReader(1, label_delim='|'),
-                       #item_tfms = item_tfms,
-                       batch_tfms = batch_tfms)
+                    get_x=ColReader(0, pref=root, suff='.png'),
+                    splitter=RandomSplitter(), #splitter=ColSplitter(col='is_valid'),
+                    get_y=ColReader(1, label_delim='|'),
+                    #item_tfms = item_tfms,
+                    batch_tfms = batch_tfms)
 
-    dls = cells.dataloaders(df)
+    dls = cells.dataloaders(df, bs=128)
     #dls.show_batch()
     return dls
 
@@ -55,7 +94,7 @@ def create_timm_body(arch:str, pretrained=True, cut=None):
     else: raise NamedError("cut must be either integer or function")
 
 def get_model(dls):
-    body = create_timm_body('resnet50', pretrained=True) #resnext50d_32x4d
+    body = create_body(xresnet101, pretrained=True) #resnext50d_32x4d
     #w = body[0][0].weight
     #body[0][0] = nn.Conv2d(4, 32, kernel_size=(3, 3), stride=2, padding=1, bias=False)
     #body[0][0].weight = nn.Parameter(torch.cat([w, nn.Parameter(torch.mean(w, axis=1).unsqueeze(1))], axis=1))
@@ -66,6 +105,19 @@ def get_model(dls):
     return model
 
 
+def L1_Loss(A_tensors, B_tensors):
+    return torch.abs(A_tensors - B_tensors)
+
+
+def get_puzzle_model(dls):
+    model = Classifier(args.architecture)
+    param_groups = model.get_parameter_groups(print_fn=None)
+    gap_fn = model.global_average_pooling_2d
+    model = model.cuda()
+    model.train()
+    class_loss_fn = nn.MultiLabelSoftMarginLoss(reduction='none').cuda()
+    re_loss_fn = L1_Loss
+
 if __name__ == '__main__':
     #File check.
     #for file in os.listdir(root):
@@ -75,10 +127,11 @@ if __name__ == '__main__':
     #    except:
     #        print(file)
     dls = get_data()
-    #learn = Learner(dls, get_model(dls), loss_func=BCEWithLogitsLossFlat(), metrics=[accuracy_multi, PrecisionMulti()], splitter=default_split).to_fp16() #clip=0.5
-    learn = load_learner('baseline')
-    learn.dls = dls
+    learn = Learner(dls, get_model(dls), loss_func=BCEWithLogitsLossFlat(), metrics=[accuracy_multi, PrecisionMulti()], splitter=default_split).to_fp16() #clip=0.5
+    #learn = load_learner('baseline')
+    #learn.dls = dls
     #learn.freeze()
     #print(learn.lr_find())
-    learn.fine_tune(20, base_lr=3e-2, freeze_epochs=1, cbs=[SaveModelCallback(monitor='accuracy_multi')]) #EarlyStoppingCallback(patience=3),
+    with learn.distrib_ctx():
+        learn.fine_tune(20, base_lr=3e-2, freeze_epochs=1) #, cbs=[SaveModelCallback(monitor='accuracy_multi')]) #EarlyStoppingCallback(patience=3),
     learn.export('baseline')
