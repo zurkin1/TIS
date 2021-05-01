@@ -19,13 +19,9 @@ from fastai.metrics import accuracy_multi
 import os
 from fastai.distributed import *
 from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
-from puzzle_utils import *
-from networks import *
-import torch
-import torch.nn as nn
 
 
-root = '/home/dsi/zurkin/data/public/' #train_p/'
+root = '/home/dsi/zurkin/data/public_masked/' #train_p/'
 nfold = 5
 
 
@@ -51,7 +47,9 @@ def get_train_aug(): return albumentations.Compose([
 
 
 def get_data():
-    df = pd.read_csv(root+'../kaggle2.csv') #train.csv')
+    files = set([name.rstrip('.png') for name in os.listdir(root)])
+    df = pd.read_csv(root+'../public.csv') #train.csv')
+    df = df.loc[df.ID.isin(files)]
     #df = os.listdir(root)
     #df = pd.DataFrame(df, columns=['ID'])
     #df['Label'] = '0'
@@ -76,7 +74,7 @@ def get_data():
                     get_x=ColReader(0, pref=root, suff='.png'),
                     splitter=RandomSplitter(), #splitter=ColSplitter(col='is_valid'),
                     get_y=ColReader(1, label_delim='|'),
-                    #item_tfms = item_tfms,
+                    item_tfms = item_tfms,
                     batch_tfms = batch_tfms)
 
     dls = cells.dataloaders(df, bs=128)
@@ -94,7 +92,7 @@ def create_timm_body(arch:str, pretrained=True, cut=None):
     else: raise NamedError("cut must be either integer or function")
 
 def get_model(dls):
-    body = create_body(xresnet101, pretrained=True) #resnext50d_32x4d
+    body = create_body(resnet50, pretrained=True) #resnext50d_32x4d
     #w = body[0][0].weight
     #body[0][0] = nn.Conv2d(4, 32, kernel_size=(3, 3), stride=2, padding=1, bias=False)
     #body[0][0].weight = nn.Parameter(torch.cat([w, nn.Parameter(torch.mean(w, axis=1).unsqueeze(1))], axis=1))
@@ -104,19 +102,6 @@ def get_model(dls):
     apply_init(model[1], nn.init.kaiming_normal_)
     return model
 
-
-def L1_Loss(A_tensors, B_tensors):
-    return torch.abs(A_tensors - B_tensors)
-
-
-def get_puzzle_model(dls):
-    model = Classifier(args.architecture)
-    param_groups = model.get_parameter_groups(print_fn=None)
-    gap_fn = model.global_average_pooling_2d
-    model = model.cuda()
-    model.train()
-    class_loss_fn = nn.MultiLabelSoftMarginLoss(reduction='none').cuda()
-    re_loss_fn = L1_Loss
 
 if __name__ == '__main__':
     #File check.
@@ -132,6 +117,6 @@ if __name__ == '__main__':
     #learn.dls = dls
     #learn.freeze()
     #print(learn.lr_find())
-    with learn.distrib_ctx():
-        learn.fine_tune(20, base_lr=3e-2, freeze_epochs=1) #, cbs=[SaveModelCallback(monitor='accuracy_multi')]) #EarlyStoppingCallback(patience=3),
+    #with learn.distrib_ctx():
+    learn.fit_one_cycle(30, 3e-4, cbs=[SaveModelCallback(monitor='precision_score')]) #EarlyStoppingCallback(patience=3),
     learn.export('baseline')
