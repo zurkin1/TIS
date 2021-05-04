@@ -25,15 +25,31 @@ from torchvision import transforms
 from gradcam.utils import visualize_cam
 from gradcam import GradCAM
 import sys
-from puzzle_utils import *
-from puzzle_networks import *
+#from puzzle_utils import *
+#from puzzle_networks import *
 from lime import lime_image
 import albumentations
-from hpa3 import AlbumentationsTransform
+from hpa import AlbumentationsTransform, HpaDataset
 
 
 ROOT = '/home/dsi/zurkin/data/'
 torch.multiprocessing.set_start_method('spawn', force=True)
+TILE_SIZE = (256,256)
+CONF_THRESH = 0.5
+learn = load_learner('baseline') #'../input/cellpose2/stage2-rn18.pkl')
+load_model('./models/model.pth', model=learn, opt="", with_opt=False)
+LEARN_LBL_NAMES = learn.dls.vocab
+KAGGLE_LBL_NAMES = ["nucleoplasm", "nuclear_membrane", "nucleoli", "nucleoli_fibrillar_center", "nuclear_speckles",\
+                    "nuclear_bodies", "endoplasmic_reticulum", "golgi_apparatus", "intermediate_filaments", "actin_filaments",\
+                    "microtubules", "mitotic_spindle", "centrosome", "plasma_membrane", "mitochondria", "aggresome", "cytosol",\
+                    "vesicles", "negative"]
+LEARN_INT_2_STR = {x:LEARN_LBL_NAMES[x] for x in np.arange(19)}
+KAGGLE_INT_2_STR = {x:KAGGLE_LBL_NAMES[x] for x in np.arange(19)}
+STR_2_KAGGLE_INT = {v:k for k,v in KAGGLE_INT_2_STR.items()}
+#LEARN_INT_2_KAGGLE_INT = {k:STR_2_KAGGLE_INT[v] for k,v in LEARN_INT_2_STR.items()}
+LEARN_INT_2_KAGGLE_INT = {x:int(LEARN_LBL_NAMES[x]) for x in np.arange(19)}
+# grayscale=0, R=1, G=2, B=3. channels = [cytoplasm, nucleus]
+channels = [1,3] # red, blue. [[2,3], [0,0], [0,0]]
 
 
 def encode_binary_mask(mask, mask_id): #contour, image_shape):
@@ -129,16 +145,6 @@ def default_rle(shape):
     return sp
 
 
-class Hook():
-    def __init__(self,m):
-        self.hook = m.register_forward_hook(self.hook_func)
-    def hook_func(self,m,i,o):
-        self.stored = o.detach().clone()
-    def __enter__(self, *args): return self
-    def __exit__(self, *args):
-        self.hook.remove()
-
-
 def visualize_cam1(mask, img, ID, clsid):
     """Make heatmap from mask and synthesize GradCAM result image using heatmap and img.
     Args:
@@ -166,7 +172,7 @@ def visualize_cam1(mask, img, ID, clsid):
 def prepare_data(ids, model):
     channels = [1,3]
     for ind, ID in enumerate(tqdm(ids)):
-        ids_processed = [x.split('.')[0] for x in os.listdir(ROOT+'public_masked/')]
+        ids_processed = [x.split('.')[0] for x in os.listdir(ROOT+'public_masks/')]
         if ID in ids_processed:
             continue
         print(ID, ' processed.')
@@ -177,40 +183,36 @@ def prepare_data(ids, model):
             mask, flows, styles, diams = model.eval(img, diameter=200, channels=channels, do_3D=False, progress=None) #flow_threshold=None,
             if mask.max() <= 4:
                 mask, flows, styles, diams = model.eval(img, diameter=100, channels=channels, do_3D=False, progress=None)
-            mask = np.where(mask>0, 1, 0)
-            img = img * mask[:, :, None]
-            Image.fromarray(np.uint8(img)).save(ROOT+'public_masked/'+ID+'.png')
+            #mask = np.where(mask>0, 1, 0)
+            #img = img * mask[:, :, None]
+            #Image.fromarray(np.uint8(img)).save(ROOT+'public_masked/'+ID+'.png')
+            np.save(ROOT+'public_masks/'+ID+'.npy', mask)
         except:
             print(f'Failed to process image {ID}')
 
-def process_image(ids, model, learn, return_dict):
-    TILE_SIZE = (256,256)
-    CONF_THRESH = 0.1
-    LEARN_LBL_NAMES = learn.dls.vocab
-    KAGGLE_LBL_NAMES = ["nucleoplasm", "nuclear_membrane", "nucleoli", "nucleoli_fibrillar_center", "nuclear_speckles",\
-                        "nuclear_bodies", "endoplasmic_reticulum", "golgi_apparatus", "intermediate_filaments", "actin_filaments",\
-                        "microtubules", "mitotic_spindle", "centrosome", "plasma_membrane", "mitochondria", "aggresome", "cytosol",\
-                        "vesicles", "negative"]
-    LEARN_INT_2_STR = {x:LEARN_LBL_NAMES[x] for x in np.arange(19)}
-    KAGGLE_INT_2_STR = {x:KAGGLE_LBL_NAMES[x] for x in np.arange(19)}
-    STR_2_KAGGLE_INT = {v:k for k,v in KAGGLE_INT_2_STR.items()}
-    #LEARN_INT_2_KAGGLE_INT = {k:STR_2_KAGGLE_INT[v] for k,v in LEARN_INT_2_STR.items()}
-    LEARN_INT_2_KAGGLE_INT = {x:int(LEARN_LBL_NAMES[x]) for x in np.arange(19)}
-    # grayscale=0, R=1, G=2, B=3. channels = [cytoplasm, nucleus]
-    channels = [1,3] # red, blue. [[2,3], [0,0], [0,0]]
 
+#Image rescaling to (nR * nC) size.
+def scale(im, nR, nC):
+    nR0 = len(im)     # source number of rows
+    nC0 = len(im[0])  # source number of columns
+    return np.array([[ im[int(nR0 * r / nR)][int(nC0 * c / nC)]
+             for c in range(nC)] for r in range(nR)])
+
+
+def process_image(ids, model, learn):
     for ind, ID in enumerate(tqdm(ids)):
         ids_processed = [x.split('.')[0] for x in os.listdir(ROOT+'test_p2/')]
         if ID in ids_processed:
             continue
-        print(ID, ' processed.')
+        print(f'Processing {ID}.')
         img, orig_shape = read_image(ID)
         #img_array = np.array(img) #np.transpose(, (2,0,1))
         #Use cellpose for masks. masks (list of 2D arrays, or single 3D array (if do_3D=True)) – labelled image, where 0=no masks; 1,2,…=mask labels.
-        mask, flows, styles, diams = model.eval(img, diameter=200, channels=channels, do_3D=False, progress=None) #flow_threshold=None,
-        if mask.max() <= 4:
-            mask, flows, styles, diams = model.eval(img, diameter=100, channels=channels, do_3D=False, progress=None)
-        io.save_masks(img, mask, flows, ROOT+f'test_p3/{ID}.png')
+        #mask, flows, styles, diams = model.eval(img, diameter=200, channels=channels, do_3D=False, progress=None) #flow_threshold=None,
+        #if mask.max() <= 4:
+        #    mask, flows, styles, diams = model.eval(img, diameter=100, channels=channels, do_3D=False, progress=None)
+        #io.save_masks(img, mask, flows, ROOT+f'test_p3/{ID}.png')
+        mask = np.load(ROOT+'test_masks/'+ID+'.npy')
         mask_bin = np.where(mask > 0, 1, 0)
         img = np.uint8(img*mask_bin[:, :, None])
 
@@ -229,13 +231,6 @@ def process_image(ids, model, learn, return_dict):
         #    for bbox in bboxes]
 
         #Calculate RLEs for all cells ordered by their ID in mask.
-        #Image rescaling to (nR * nC) size.
-        def scale(im, nR, nC):
-            nR0 = len(im)     # source number of rows
-            nC0 = len(im[0])  # source number of columns
-            return np.array([[ im[int(nR0 * r / nR)][int(nC0 * c / nC)]
-                     for c in range(nC)] for r in range(nR)])
-
         orig_mask = scale(mask, orig_shape[0], orig_shape[1])
         rles = [encode_binary_mask(orig_mask, mask_id) for mask_id in range(mask.max()+1)]
 
@@ -268,7 +263,7 @@ def process_image(ids, model, learn, return_dict):
             mask_cam = gradcam(normed_torch_img[0], class_idx=class_idx) #[0] Gradcam mask for one predicted class.
             visualize_cam1(mask_cam[0], torch_img, ID, class_idx)
             mask_cam = mask_cam[0].numpy()
-            
+
             #img_cpy, mask_cam = explanation.get_image_and_mask(class_idx, positive_only=True)
 
             #Find cells with high explanation. Multiply by Cellpose mask to find relevant cells. Calculate histogram and select only large overlapping regions.
@@ -308,40 +303,71 @@ def process_image(ids, model, learn, return_dict):
         #    return (orig_shape, default_rle(orig_shape))
 
 
+def process_image2(ids):
+    for ind, ID in enumerate(tqdm(ids)):
+        ids_processed = [x.split('.')[0] for x in os.listdir(ROOT+'test_p2/')]
+        if ID in ids_processed:
+            continue
+        print(f'Processing {ID}.')
+        img, orig_shape = read_image(ID)
+        mask = np.load(ROOT+'test_masks/'+ID+'.npy')
+        orig_mask = scale(mask, orig_shape[0], orig_shape[1])
+        prediction_str = ''
+
+        for cell in range(1, mask.max()+1):
+            mask_bin = np.where(mask == cell, 1, 0)
+            img = np.uint8(img*mask_bin[:, :, None])
+            #Calculate RLEs for all cells ordered by their ID in mask.
+            rle = encode_binary_mask(orig_mask, cell)
+
+            _preds = learn.predict(img)
+            class_idxs = np.where(_preds[2]>CONF_THRESH)[0]
+            #class_idxs = np.argpartition(_preds[2], -4)[-4:].numpy()
+
+            for class_idx in class_idxs:
+                cell_pred = _preds[2][class_idx].item()
+                clsid = LEARN_LBL_NAMES[class_idx]
+                prediction_str+=f'{int(clsid)} {cell_pred} {rle} '
+
+            #Save Predictions to Be Added to Dataframe At The End.
+            #ImageAID,ImageAWidth,ImageAHeight,class_0 1 rle_encoded_cell_1_mask class_14 1 rle_encoded_cell_1_mask 0 1 rle encoded_cell_2_mask
+            with open(ROOT+'test_p2/'+ID+'.txt', 'w') as f:
+                f.write(f'{ID},{orig_shape[0]},{orig_shape[1]},{prediction_str}')
+                f.flush()
+                os.fsync(f.fileno())
+
+
 if __name__ == '__main__':
     print(time.ctime())
+    model = cellmodels.Cellpose(gpu=True, model_type='cyto') #) #, net_avg=False, torch=True, device=split
+    X_test = [name.rstrip('.png') for name in (os.listdir(ROOT+'public/')) if '.png' in name and name[0] == '1' and name[1] == sys.argv[1]]
+    #X_test = ['09852156-bbb8-11e8-b2ba-ac1f6b6435d0'] #'5f79a114-bb99-11e8-b2b9-ac1f6b6435d0', 'fdd126fa-8e87-4ffe-b2b7-3ee48156d887', 'cd65456d-cdf6-4f99-805d-bfb85c881b24', 'cda406d5-178a-4011-b4cc-389ded4dcf27']
+    prepare_data(X_test,model)
+    #process_image2(X_test)
+
+
+    """
+    X_test = pd.read_csv(ROOT+'../sample_submission.csv').iloc[(split-1)*100:split*100]['ID'].values
+    X = np.array_split(X_test, num_processes)
+    print(f'Split length: {len(X[0])}.')
+
     manager = Manager()
     return_dict = manager.dict()
     df = []
-    model = cellmodels.Cellpose(gpu=True, model_type='cyto') #) #, net_avg=False, torch=True, device=split
-    learn = load_learner('baseline') #'../input/cellpose2/stage2-rn18.pkl')
-    load_model('./models/model.pth', model=learn, opt="", with_opt=False)
     num_processes = 1
-    X_test = [name.rstrip('.png') for name in (os.listdir(ROOT+'test_p/')) if '.png' in name and name[0] == sys.argv[1]]
-    X = np.array_split(X_test, num_processes)
-    print(f'Split length: {len(X[0])}.')
     processes = []
-    #process_image([X_test[4]],model,learn,return_dict)
-
-    """
     for rank in range(num_processes):
         p = mp.Process(target=process_image, args=(X[rank],model,learn,return_dict))
         p.start()
         processes.append(p)
     for p in processes:
         p.join()
+
+    for k,v in return_dict.items():
+        df.loc[df.ID==k,'PredictionString']=v
+        df.append([k, v[0][0], v[0][1], v[1]])
+
+    df = pd.DataFrame.from_records(df, columns=['ID', 'ImageWidth', 'ImageHight', 'PredictionString'])
+    df.to_csv(ROOT+f'dataset/submission.csv', index=False)
     """
-
-    return_dict = {}
-    #X_test = pd.read_csv(ROOT+'../sample_submission.csv').iloc[(split-1)*100:split*100]['ID'].values
-    #X_test = ['09852156-bbb8-11e8-b2ba-ac1f6b6435d0'] #'5f79a114-bb99-11e8-b2b9-ac1f6b6435d0', 'fdd126fa-8e87-4ffe-b2b7-3ee48156d887', 'cd65456d-cdf6-4f99-805d-bfb85c881b24', 'cda406d5-178a-4011-b4cc-389ded4dcf27']
-    #prepare_data(X_test,model)
-    process_image(X_test,model,learn,return_dict)
-
-    #for k,v in return_dict.items():
-        #df.loc[df.ID==k,'PredictionString']=v
-        #df.append([k, v[0][0], v[0][1], v[1]])
-
-    #df = pd.DataFrame.from_records(df, columns=['ID', 'ImageWidth', 'ImageHight', 'PredictionString'])
-    #df.to_csv(ROOT+f'dataset/submission.csv', index=False)
-    print(time.ctime(), len(df))
+    print(time.ctime())
