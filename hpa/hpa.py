@@ -25,14 +25,18 @@ from torchvision import transforms
 import random
 from PIL import Image
 import torch
+import cv2
 
 
-root = '/home/dsi/zurkin/data/' #train_p/'
+root = '/home/dsi/zurkin/data/train/' #train_p/'
 nfold = 5
 device = torch.device(f'cuda:{0}' if torch.cuda.is_available() else "cpu")
+image_res=1024
+batch_size = 16
+#imagenet_stats = ([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 data_transforms = {
     0: transforms.Compose([
-        #transforms.RandomResizedCrop(image_res), #224
+        transforms.RandomResizedCrop(image_res), #224
         transforms.RandomHorizontalFlip(),
         #transforms.ColorJitter(),
         transforms.RandomAffine(90),
@@ -41,7 +45,7 @@ data_transforms = {
     ]),
     1: transforms.Compose([
         #transforms.RandomResizedCrop(image_res), #256
-        #transforms.CenterCrop(image_res),
+        transforms.CenterCrop(image_res),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
@@ -61,17 +65,20 @@ class HpaDataset(Dataset):
         return len(self.df)
 
     def __getitem__(self, idx):
-        img = Image.open(f'{self.root}public/{self.df.ID[idx]}.png')
+        img = np.array(Image.open(f'{self.root}/{self.df.ID[idx]}_green.png'))
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+        """
         mask = np.load(f'{self.root}public_masks/{self.df.ID[idx]}.npy')
         num_cells = mask.max()
         cell = random.randint(1,num_cells+1)
         mask = np.where(mask==cell,1,0).astype(np.uint8)
         img = img * mask[:,:,None]
+        """
         img = Image.fromarray(img)
         img = self.transform(img)
         #label = torch.Tensor([int(self.df.Label.iloc[idx])]).squeeze() #.reshape(-1, 2)
         #label = torch.ByteTensor(int(self.df.Label.iloc[idx]), 19).squeeze()
-        label = int(self.df.Label.iloc[idx])
+        label = self.df.Label.iloc[idx].split('|')
         #sample = {'image': image, 'label': label}
 
         return img, label #.reshape(1,-1) #sample
@@ -102,12 +109,12 @@ def get_train_aug(): return albumentations.Compose([
 
 
 def get_data():
-    files = set([name.rstrip('.npy') for name in os.listdir(root+'public_masks/')])
-    df = pd.read_csv(root+'public.csv') #train.csv')
+    files = set([name.rstrip('_green.png') for name in os.listdir(root) if name[0]=='0'])
+    df = pd.read_csv(root+'/../public.csv') #train.csv')
     # df = df.sample(frac=0.4).reset_index(drop=True)
     labels = [str(i) for i in range(19)]
     df = df.loc[df.ID.isin(files)]
-    
+
     for x in labels: df[x] = df.Label.apply(lambda r: int(x in r.split('|')))
     df['fold'] = np.nan
     mskf = MultilabelStratifiedKFold(n_splits=nfold)
@@ -116,16 +123,16 @@ def get_data():
 
     df['fold'] = df['fold'].astype('int')
     df['is_valid'] = df.fold.apply(lambda x: x==0)
-    df = df.loc[df.Label.isin(labels)]
+    #df = df.loc[df.Label.isin(labels)]
     return df
 
     item_tfms = AlbumentationsTransform(get_train_aug()) #RandomResizedCrop(460, min_scale=0.75, ratio=(1.,1.))
-    batch_tfms = [*aug_transforms(size=320, flip_vert=True, max_lighting=0.1, max_zoom=1.05, max_warp=0.1), #aug_transforms(do_flip=True, flip_vert=True, max_rotate=180.0, max_lighting=0.4, p_affine=0.7, p_lighting=0.7)
-                  Normalize.from_stats([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])] #, 0.456 , 0.224
+    batch_tfms = [*aug_transforms(size=1024, flip_vert=True, max_lighting=0.1, max_zoom=1.05, max_warp=0.1), #aug_transforms(do_flip=True, flip_vert=True, max_rotate=180.0, max_lighting=0.4, p_affine=0.7, p_lighting=0.7)
+                  Normalize.from_stats([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]
 
     #class PILImageRGBA(PILImage): _show_args, _open_args = {'cmap': 'P'}, {'mode': 'RGBA'}
-    cells = DataBlock(blocks=(ImageBlock(PILImage), MultiCategoryBlock),
-                    get_x=ColReader(0, pref=root+'public/', suff='.png'),
+    cells = DataBlock(blocks=(ImageBlock(PILImageBW), MultiCategoryBlock),
+                    get_x=ColReader(0, pref=root, suff='_green.png'),
                     splitter=RandomSplitter(), #splitter=ColSplitter(col='is_valid'),
                     get_y=ColReader(1, label_delim='|'),
                     item_tfms = item_tfms,
@@ -165,16 +172,17 @@ if __name__ == '__main__':
     #        im.verify()
     #    except:
     #        print(file)
-    #dls = get_data()
-    df = get_data()
+    df = get_data() #dls
+
     train_ds = HpaDataset(False, df)
     valid_ds = HpaDataset(True, df)
-    dls = DataLoaders.from_dsets(train_ds, valid_ds, bs=32, device=device)
+    dls = DataLoaders.from_dsets(train_ds, valid_ds, bs=batch_size, device=device)
     dls.c = 19
+
     #clweight = compute_class_weight('balanced', classes=range(0,19), y=df.Label.values)
     loss_func = FocalLossFlat(gamma=2) #weight=torch.FloatTensor(clweight).cuda(),
     model = get_model()
-    learn = Learner(dls, model, loss_func=loss_func, metrics=[accuracy, Precision(average='weighted')], splitter=default_split) #.to_fp16() #clip=0.5 accuracy_multi, PrecisionMulti()
+    learn = Learner(dls, model, loss_func=loss_func, metrics=[accuracy_multi, PrecisionMulti()], splitter=default_split).to_fp16() #clip=0.5 accuracy_multi, PrecisionMulti()
     #learn = load_learner('baseline')
     #learn.dls = dls
     #learn.freeze()
