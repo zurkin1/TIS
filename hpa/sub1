@@ -1,0 +1,3 @@
+mv submission.csv submissionold.csv
+cat submission_1.csv submission_2.csv submission_3.csv submission_4.csv submission_5.csv submission_6.csv > submission.csv
+rm submission_*.csv

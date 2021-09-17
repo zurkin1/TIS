@@ -1,0 +1,2 @@
+cp submission_copy.csv submission.csv
+for f in ../test_p2/*.txt; do (cat "${f}"; echo) >> submission.csv; done

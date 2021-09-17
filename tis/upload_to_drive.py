@@ -15,7 +15,7 @@ for file in os.listdir('./hpa_p/'):
     #file1 = drive.CreateFile({'parents': [{'id': 'TIS'}]})
     #file = 'hpa.zip'
     file1 = drive.CreateFile({'title': file, 'parents': [{'id': '1QnHbaBNtNHPcfXq1pWUIijYLuNJ6LgeR'}]})
-    file1.SetContentFile('hpa_p/'+file)
+    file1.SetContentFile('./hpa_p/'+file)
     file1['title'] = file
     file1.Upload()
     i += 1
