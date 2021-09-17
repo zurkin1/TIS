@@ -1,5 +1,4 @@
 #!pip install -q timm
-#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
 
 from fastai.vision.all import *
 from fastai.callback.mixup import *
