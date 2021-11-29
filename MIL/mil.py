@@ -18,7 +18,7 @@ import cv2
 import slideio
 
 
-root = '/home/dsi/zurkin/data/'
+root = '/home/dsi/zurkin/data/mil/'
 nfold = 5
 device = torch.device(f'cuda:{0}' if torch.cuda.is_available() else "cpu")
 image_res=100
@@ -43,12 +43,14 @@ data_transforms = {
 
 
 class MILDataset(Dataset):
-    def __init__(self, files=[root+'27124.svs'], transform=None):
+    def __init__(self, transform=None): #files=[root+'27124.svs'],
+        files = [name for name in os.listdir(root) if not 'incomplete' in name] #.lstrip('Copy of ') 
         slides = []
         for i,name in enumerate(files):
-            sys.stdout.write('Opening SVS headers: [{}]\r'.format(i+1))
-            sys.stdout.flush()
-            slides.append(slideio.open_slide(name, 'SVS'))
+            #sys.stdout.write('Opening SVS headers: [{}]\r'.format(i+1))
+            #sys.stdout.flush()
+            print('.', end="")
+            slides.append(slideio.open_slide(root+name, 'SVS'))
         print('')
         #Flatten grid
         grid = [[(0,0), (100, 100), (200, 200), (300, 300)]]
@@ -61,10 +63,10 @@ class MILDataset(Dataset):
         self.targets = [0, 1, 0, 1]
         self.grid = grid
         self.slideIDX = slideIDX
-        self.transform = transform
+        self.transform = data_transforms[0]
         self.mode = None
         self.mult = 1
-        self.size = int(np.round(224*1))
+        self.size = int(np.round(image_res*self.mult))
         self.level = 0
         self.vocab = [str(i) for i in range(0, 2)]
 
@@ -72,12 +74,13 @@ class MILDataset(Dataset):
           slideIDX = self.slideIDX[index]
           coord = self.grid[index]
           #img = self.slides[slideIDX].read_region(coord,self.level,(self.size,self.size)).convert('RGB')
-          img = self.slides[index].scene[0].read_block(size=(image_res,0))
-          if self.mult != 1:
-              img = img.resize((self.size,self.size),Image.BILINEAR)
-          if self.transform is not None:
-              img = self.transform(img)
-          return img, self.targets[index]
+          scene = self.slides[0].get_scene(0)
+          img = scene.read_block(size=(image_res,0))
+          #img = np.moveaxis(img, -1, 0)
+          im = Image.fromarray(img)
+          #im = im.resize((self.size,self.size))
+          im = self.transform(im)
+          return im, self.targets[index]
 
     def __len__(self):
         return len(self.grid)
