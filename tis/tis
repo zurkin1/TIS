@@ -1,0 +1,45 @@
+█epoch     train_loss  valid_loss  accuracy_multi  precision_score  time    
+██0         0.790848    0.671952    0.593493        0.134173         10:01     
+Better model found at epoch 0 with precision_score value: 0.13417341377845632.
+██1         0.645004    0.564614    0.869928        0.218262         10:12     
+Better model found at epoch 1 with precision_score value: 0.21826193460397778.
+██2         0.392116    0.326924    0.944340        0.375545         10:21     
+Better model found at epoch 2 with precision_score value: 0.3755447394013956.
+█/home/dsi/zurkin/anaconda3/lib/python3.7/site-packages/sklearn/metrics/_classification.py:1272: UndefinedMetricWarning: Precision is ill-defined and being set to 0.0 in labels with no predicted samples. Use `zero_division` parameter to control this behavior.
+  _warn_prf(average, modifier, msg_start, len(result))
+█3         0.179865    0.157919    0.949455        0.579307         10:24     
+Better model found at epoch 3 with precision_score value: 0.5793071727232487.
+██4         0.146640    0.133130    0.953888        0.671456         10:30     
+Better model found at epoch 4 with precision_score value: 0.6714557442734828.
+██5         0.139310    0.127215    0.955539        0.715343         10:33     
+Better model found at epoch 5 with precision_score value: 0.7153434594872962.
+██6         0.129717    0.147900    0.957816        0.770722         10:45     
+Better model found at epoch 6 with precision_score value: 0.7707222956293219.
+██7         0.124029    0.120908    0.956731        0.712170         10:54     
+██8         0.118546    0.112926    0.959648        0.764792         11:10     
+██9         0.114339    0.150852    0.946103        0.748606         11:37     
+██10        0.110283    0.107390    0.961248        0.740955         11:36     
+██11        0.107122    0.104432    0.961555        0.755625         11:49     
+██12        0.103206    0.105687    0.962219        0.791301         11:44     
+Better model found at epoch 12 with precision_score value: 0.7913012266757493.
+██13        0.101990    0.104511    0.962284        0.767318         11:48     
+██14        0.101514    0.156738    0.942523        0.762471         11:42     
+██15        0.096008    0.105721    0.962477        0.758143         11:51     
+██16        0.095019    0.095217    0.964967        0.802824         11:38     
+Better model found at epoch 16 with precision_score value: 0.8028235644194518.
+██17        0.095366    0.093466    0.965701        0.799598         11:39     
+██18        0.090130    0.094486    0.965432        0.820411         11:39     
+Better model found at epoch 18 with precision_score value: 0.8204112797604699.
+██19        0.087850    0.090567    0.966762        0.827959         11:39     
+Better model found at epoch 19 with precision_score value: 0.827959124636891.
+██20        0.085396    0.090523    0.966790        0.815268         11:45     
+██21        0.086129    0.089329    0.967143        0.827370         11:42     
+██22        0.083711    0.086837    0.968104        0.841143         11:48     
+Better model found at epoch 22 with precision_score value: 0.8411433109300613.
+██23        0.082215    0.085554    0.968370        0.828850         11:43     
+██24        0.080373    0.085664    0.968482        0.826468         11:42     
+██25        0.079299    0.085504    0.968610        0.827526         10:49     
+██26        0.078272    0.085054    0.968846        0.820227         09:47     
+██27        0.077853    0.084976    0.968966        0.825317         09:41     
+██28        0.076889    0.084825    0.968964        0.822453         09:44     
+██29        0.077121    0.084829    0.968925        0.821794         09:42     
