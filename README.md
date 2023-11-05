@@ -25,4 +25,4 @@
 * TCGA performed integrated multi-dimensional analysis including whole exome sequencing, copy number, methylation, expression analysis and proteomics on each sample.
 * All TCGA data is freely available through the Genomic Data Commons portal and has led to many insights into cancer biology and precision medicine. 
 
-+ The idea is to use the TCGA high resolution SVS images of patients, together with their genomic data, and using deep neural network to try predicting the TIS values.
+* The idea is to use the TCGA high resolution SVS images of patients, together with their genomic data, and using deep neural network to try predicting the TIS values.
