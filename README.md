@@ -26,3 +26,10 @@
 * All TCGA data is freely available through the Genomic Data Commons portal and has led to many insights into cancer biology and precision medicine. 
 
 * The idea is to use the TCGA high resolution SVS images of patients, together with their genomic data, and using deep neural network to try predicting the TIS values.
+* The main problem when working with high resolution biopsies data of this kind, is how to handle the size of the image. SVS image can be as large as 3 Giga bytes, and it does not fit the current architectures of
+  neural networks. What all researchers do is split the images to areas of interest (aoi) in the image, usually these are areas where there are lots of lymphocytes, or where the tumor is located, and train the neural net only on these areas, or patches. Finally, another model is trained in order to combine the results of all the different patches. Along the years various architectures have been developed around these
+  two different models, the classifier and the combiner.
+
+# TIS Project Pipelin
+![TIS flow][TIS flow.jpg]
+* The first step is downloading the SVS files from TCGA. This can be done using the manifests. We decided to download BRCA patients. You can use gdc-client.exe executable and manifests files in the code directory as well as the file_download.py script for example.
