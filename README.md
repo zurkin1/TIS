@@ -31,5 +31,5 @@
   two different models, the classifier and the combiner.
 
 # TIS Project Pipelin
-![TIS flow][data/TIS flow.jpg]
+![TIS flow][data/TISflow.jpg]
 * The first step is downloading the SVS files from TCGA. This can be done using the manifests. We decided to download BRCA patients. You can use gdc-client.exe executable and manifests files in the code directory as well as the file_download.py script for example.
