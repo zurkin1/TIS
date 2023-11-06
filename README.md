@@ -30,10 +30,18 @@
   neural networks. What all researchers do is split the images to areas of interest (aoi) in the image, usually these are areas where there are lots of lymphocytes, or where the tumor is located, and train the neural net only on these areas, or patches. Finally, another model is trained in order to combine the results of all the different patches. Along the years various architectures have been developed around these
   two different models, the classifier and the combiner.
 
-# TIS Project Pipelin
+# TIS Project Pipeline
 ![TIS flow](data/TISflow.jpg)
-* The first step is downloading the SVS files from TCGA. This can be donw using manifests. We downloaded the BRCA patients (see gdc-client.exe and the manifests files in the code folder).
+* The first step is downloading the SVS files from TCGA. This can be done using manifests. We downloaded files of BRCA patients. (See gdc-client.exe and manifests files in the code folder).
 * Next, our supervisor Professor Efroni connected us with one of his colleagues, a researcher from Ichilov Hospital, who was able to provide us access to a professional pathologist. With her guidance, we trained a group of students to mark and label regions of interest across the SVS slides in our breast cancer dataset. This allowed us to generate a large labeled training set to develop our deep learning model. The pathologist helped identify clinically relevant areas and key features for the students to focus on during the annotation process. By leveraging the pathologist's expertise, we ensured our training data had accurate, high-quality labels across numerous whole slide images. This critical preparation enabled us to apply deep learning to analyze the complex histology patterns in our unique biopsy dataset from breast cancer patients.
 * After the labeling process, the next step was to split the large SVS files into smaller image patches based on the students' markings. We also performed some image preprocessing on the patches, including color correction, blurring, and other transformations. This was implemented in the image_processing.py script. Preprocessing the image patches was an important step to normalize the appearance of the histology slides and prepare the data for model training.
-* Next, we trained a classifier only on the relevant patches, trying to predict the TIS class, low or high. low means TIS score < 0.5, and high otherwise. The basic model ia Alexnet, and we used transfer learning. Loss is binary cross entropy, and metric is AUC (see code folder).
 * The final component was training a model to aggregate the patch-level predictions into an overall slide-level output. For this combiner model, we used a tabular learner from the fastai library. The input to this model was the distribution of TIS scores predicted by the CNN for each patch across a whole slide image. The combiner model learned to analyze the shape of this score distribution to arrive at a final slide-level prediction. By training the tabular learner on top of the CNN patch classifier, we could effectively integrate the histological patterns detected across an entire SVS slide. This two-step process - first extracting features from image patches, then contextualizing the outputs for the whole slide - enabled robust computational pathology predictions from our breast cancer biopsy data. The combiner model tied together the patch classification results into a biologically coherent outcome for each patient sample (file tis-alexnet-histogram-tabular.py).
+* The best AUC we were able to achieve was around 0.71.
+
+# Other Architectures
+* Resnet 34 with transfer learning (see file tis-resnet34-histogram-tabular.py).
+* Stain normalization: Implementation of a few common stain normalization techniques: ([Reinhard](http://ieeexplore.ieee.org/document/946629/), [Macenko](http://ieeexplore.ieee.org/document/5193250/), [Vahadane](http://ieeexplore.ieee.org/document/7164042/)) in Python (3.5). See code\Stain_Normalization folder.
+* Many PyTorch transformers (see tis-transformers.py).
+* Plain PyTorch (see tis-torch.py).
+* Keras (see tis-keras.py).
+* Splitting model to head and body instead of trasnfer learning (see tis-split-model-to-head-and-body.py).
